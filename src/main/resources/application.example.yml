@@ -1,0 +1,50 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/crypto_trader
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          batch_size: 20
+
+crypto:
+  # 关注交易对（策略执行与数据采集都会用到）
+  watch-list: BTCUSDT, ETHUSDT, SOLUSDT
+
+  exchange:
+    binance:
+      # 建议通过环境变量注入密钥；如果暂时只跑骨架，也可以先不配置
+      api-key: ${BINANCE_API_KEY:}
+      secret-key: ${BINANCE_SECRET_KEY:}
+      base-url: https://api.binance.com
+
+  glassnode:
+    api-key: ${GLASSNODE_API_KEY:}
+    base-url: https://api.glassnode.com
+
+  mcp:
+    enabled: false
+    provider: openai
+    api-key: ${MCP_API_KEY:}
+    base-url: https://api.openai.com/v1/chat/completions
+    model: gpt-4
+    timeout-seconds: 30
+
+  notifier:
+    telegram:
+      bot-token: ${TELEGRAM_BOT_TOKEN:}
+      chat-id: ${TELEGRAM_CHAT_ID:}
+
+  trading:
+    # paper: 仅日志，不真实下单；live: 触发 OrderExecutor（你需要先补齐交易所下单实现与风控）
+    mode: paper
+    max-position-size-usdt: 1000
+    max-daily-trades: 10
+

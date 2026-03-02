@@ -1,0 +1,44 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/crypto_trader
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          batch_size: 20
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+crypto:
+  watch-list: BTCUSDT, ETHUSDT, SOLUSDT
+  exchange:
+    binance:
+      api-key: ${BINANCE_API_KEY:your-binance-api-key}
+      secret-key: ${BINANCE_SECRET_KEY:your-binance-secret-key}
+      base-url: https://api.binance.com
+  glassnode:
+    api-key: ${GLASSNODE_API_KEY:your-glassnode-api-key}
+    base-url: https://api.glassnode.com
+  mcp:
+    enabled: true
+    provider: openai  # openai, claude, etc.
+    api-key: ${MCP_API_KEY:your-mcp-api-key}
+    base-url: https://api.openai.com/v1/chat/completions
+    model: gpt-4
+    timeout-seconds: 30
+  notifier:
+    telegram:
+      bot-token: ${TELEGRAM_BOT_TOKEN:your-telegram-bot-token}
+      chat-id: ${TELEGRAM_CHAT_ID:your-chat-id}
+  trading:
+    mode: paper  # paper or live
+    max-position-size-usdt: 1000
+    max-daily-trades: 10
