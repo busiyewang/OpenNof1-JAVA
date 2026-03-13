@@ -1,75 +1,73 @@
 package com.crypto.trader.client.exchange;
 
 import com.crypto.trader.model.Kline;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+
 import javax.annotation.PostConstruct;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * OKX 交易所客户端（类名保留 BinanceClient 以兼容现有注入配置）。
+ *
+ * <p>公开接口（K 线查询）无需签名；私有接口（下单、查询余额）需要 HMAC-SHA256 签名。</p>
+ *
+ * <p>OKX 签名规则：</p>
+ * <pre>
+ *   preHash  = timestamp + method + requestPath + body
+ *   sign     = Base64( HmacSHA256( preHash, secretKey ) )
+ *   timestamp = ISO-8601 UTC，例如 2024-01-01T00:00:00.000Z
+ * </pre>
+ */
 @Service
 @Slf4j
 public class BinanceClient implements ExchangeClient {
 
-    /**
-     * 注意：不要在构造器里直接使用 {@link #baseUrl} 来 build WebClient。
-     *
-     * <p>因为 {@code @Value} 字段注入发生在构造器之后；如果在构造器里读取，会得到 null，
-     * 造成 WebClient 的 baseUrl 为空，最终请求拼接异常或打到错误地址。</p>
-     */
     private WebClient webClient;
-
-    /**
-     * 统一的 WebClient builder（可在配置层集中设置超时、重试、拦截器、默认 header 等）。
-     */
     private final WebClient.Builder webClientBuilder;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${crypto.exchange.binance.base-url}")
     private String baseUrl;
 
-    /**
-     * 构造 Binance API 客户端。
-     *
-     * @param webClientBuilder Spring 注入的 WebClient builder
-     */
+    @Value("${crypto.exchange.binance.api-key:}")
+    private String apiKey;
+
+    @Value("${crypto.exchange.binance.secret-key:}")
+    private String secretKey;
+
+    @Value("${crypto.exchange.binance.passphrase:}")
+    private String passphrase;
+
     public BinanceClient(WebClient.Builder webClientBuilder) {
         this.webClientBuilder = webClientBuilder;
     }
 
-    /**
-     * 组件初始化回调。
-     *
-     * <p>可在此处增加 API Key 签名/鉴权拦截器、默认 header、超时等 WebClient 配置。</p>
-     */
     @PostConstruct
     public void init() {
-        // 在字段注入完成后再构造 WebClient，确保 baseUrl 可用。
         this.webClient = webClientBuilder.baseUrl(baseUrl).build();
-        // 可在此添加 API Key 拦截器 / 签名鉴权 / 默认 header 等
     }
 
-    /**
-     * 获取 K 线数据。
-     *
-     * <p>典型对应 Binance 接口 {@code /api/v3/klines}。当前实现为占位，返回空列表。</p>
-     *
-     * @param symbol    交易对（如 {@code BTCUSDT}）
-     * @param interval  K 线周期（如 {@code 1m}）
-     * @param startTime 起始时间（epoch millis）
-     * @param endTime   结束时间（epoch millis）
-     * @return K 线列表；无数据时返回空列表（不返回 null）
-     */
+    // -------------------------------------------------------------------------
+    // 公开接口（无需签名）
+    // -------------------------------------------------------------------------
+
     @Override
     public List<Kline> getKlines(String symbol, String interval, long startTime, long endTime) {
         try {
-            // OKX 现货/合约 K 线接口：/api/v5/market/candles
-            // 文档约定：最新一根在前（时间倒序），这里按照返回顺序构造实体，
-            // 上层（StrategyExecutor）会在使用前统一按 timestamp 升序排序。
             String instId = toOkxInstId(symbol);
             String bar = toOkxBar(interval);
 
@@ -103,12 +101,12 @@ public class BinanceClient implements ExchangeClient {
                 List<?> arr = (List<?>) item;
                 if (arr.size() < 6) continue;
 
-                // OKX candles 格式（按文档）：[ ts, o, h, l, c, vol, ... ]
+                // OKX candles 格式：[ ts, o, h, l, c, vol, ... ]
                 long ts = Long.parseLong(String.valueOf(arr.get(0)));
-                BigDecimal open = new BigDecimal(String.valueOf(arr.get(1)));
-                BigDecimal high = new BigDecimal(String.valueOf(arr.get(2)));
-                BigDecimal low = new BigDecimal(String.valueOf(arr.get(3)));
-                BigDecimal close = new BigDecimal(String.valueOf(arr.get(4)));
+                BigDecimal open   = new BigDecimal(String.valueOf(arr.get(1)));
+                BigDecimal high   = new BigDecimal(String.valueOf(arr.get(2)));
+                BigDecimal low    = new BigDecimal(String.valueOf(arr.get(3)));
+                BigDecimal close  = new BigDecimal(String.valueOf(arr.get(4)));
                 BigDecimal volume = new BigDecimal(String.valueOf(arr.get(5)));
 
                 Kline k = new Kline();
@@ -125,65 +123,177 @@ public class BinanceClient implements ExchangeClient {
 
             return result;
         } catch (Exception e) {
-            log.error("Error fetching klines from OKX for {}:{} ", symbol, interval, e);
+            log.error("Error fetching klines from OKX for {}:{}", symbol, interval, e);
             return List.of();
         }
     }
 
+    // -------------------------------------------------------------------------
+    // 私有接口（需要签名）
+    // -------------------------------------------------------------------------
+
     /**
-     * 将内部 symbol（如 BTCUSDT）转换为 OKX instId（如 BTC-USDT）。
+     * OKX 现货市价下单。
+     *
+     * <p>请求格式（Map）：</p>
+     * <ul>
+     *   <li>symbol      - 内部交易对，如 BTCUSDT</li>
+     *   <li>side        - buy / sell</li>
+     *   <li>type        - market（当前只支持市价单）</li>
+     *   <li>quoteQuantity - BUY 时花费的 USDT 金额（买单用 tgtCcy=quote_ccy）</li>
+     *   <li>quantity    - SELL 时卖出的基础货币数量</li>
+     * </ul>
+     *
+     * @param request Map&lt;String, Object&gt; 下单参数
+     * @return OKX 原始响应 Map；失败时抛出异常
      */
-    private String toOkxInstId(String symbol) {
-        if (symbol == null || symbol.length() < 4) {
-            return symbol;
+    @Override
+    @SuppressWarnings("unchecked")
+    public Object placeOrder(Object request) {
+        if (!(request instanceof Map)) {
+            throw new IllegalArgumentException("request must be Map<String, Object>");
         }
-        // 简单规则：最后 4 位视为报价币种（USDT、USDC 等），中间加连字符
-        String base = symbol.substring(0, symbol.length() - 4);
+        Map<String, Object> req = (Map<String, Object>) request;
+
+        String symbol = String.valueOf(req.get("symbol"));
+        String side   = String.valueOf(req.get("side"));   // buy / sell
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("instId", toOkxInstId(symbol));
+        body.put("tdMode", "cash");   // 现货交易
+        body.put("side", side);
+        body.put("ordType", "market");
+
+        if ("buy".equalsIgnoreCase(side)) {
+            // 买入：sz 为花费的 USDT；tgtCcy=quote_ccy 告知 OKX sz 单位为报价货币
+            body.put("sz", String.valueOf(req.getOrDefault("quoteQuantity", "100")));
+            body.put("tgtCcy", "quote_ccy");
+        } else {
+            // 卖出：sz 为卖出的基础货币数量
+            body.put("sz", String.valueOf(req.getOrDefault("quantity", "0")));
+        }
+
+        try {
+            String bodyJson = objectMapper.writeValueAsString(List.of(body));
+            String timestamp = Instant.now().toString();
+            String sign = sign(timestamp, "POST", "/api/v5/trade/batch-orders", bodyJson);
+
+            Map<String, Object> response = webClient.post()
+                    .uri("/api/v5/trade/batch-orders")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> {
+                        h.add("OK-ACCESS-KEY", apiKey);
+                        h.add("OK-ACCESS-SIGN", sign);
+                        h.add("OK-ACCESS-TIMESTAMP", timestamp);
+                        h.add("OK-ACCESS-PASSPHRASE", passphrase);
+                    })
+                    .bodyValue(bodyJson)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
+                String msg = response != null ? String.valueOf(response.get("msg")) : "null response";
+                throw new RuntimeException("OKX placeOrder failed: " + msg);
+            }
+
+            log.info("OKX placeOrder success: side={} symbol={}", side, symbol);
+            // 返回第一条订单数据
+            Object data = response.get("data");
+            if (data instanceof List && !((List<?>) data).isEmpty()) {
+                return ((List<?>) data).get(0);
+            }
+            return response;
+
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to place order on OKX", e);
+        }
+    }
+
+    /**
+     * 查询 OKX 账户余额（GET /api/v5/account/balance）。
+     *
+     * @return OKX 账户余额 Map
+     */
+    @Override
+    public Object getAccountBalance() {
+        try {
+            String timestamp = Instant.now().toString();
+            String requestPath = "/api/v5/account/balance";
+            String sign = sign(timestamp, "GET", requestPath, "");
+
+            Map<String, Object> response = webClient.get()
+                    .uri(requestPath)
+                    .headers(h -> {
+                        h.add("OK-ACCESS-KEY", apiKey);
+                        h.add("OK-ACCESS-SIGN", sign);
+                        h.add("OK-ACCESS-TIMESTAMP", timestamp);
+                        h.add("OK-ACCESS-PASSPHRASE", passphrase);
+                    })
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
+                String msg = response != null ? String.valueOf(response.get("msg")) : "null response";
+                throw new RuntimeException("OKX getAccountBalance failed: " + msg);
+            }
+            return response.get("data");
+
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get account balance from OKX", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 签名工具
+    // -------------------------------------------------------------------------
+
+    /**
+     * 计算 OKX REST API HMAC-SHA256 签名。
+     *
+     * @param timestamp   ISO-8601 时间戳（Instant.now().toString()）
+     * @param method      HTTP 方法大写（GET / POST）
+     * @param requestPath 路径（含查询参数，不含 host），例如 /api/v5/account/balance
+     * @param body        POST body JSON 字符串；GET 请求传空字符串
+     * @return Base64 编码的签名字符串
+     */
+    private String sign(String timestamp, String method, String requestPath, String body) throws Exception {
+        String preHash = timestamp + method + requestPath + body;
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        byte[] hash = mac.doFinal(preHash.getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder().encodeToString(hash);
+    }
+
+    // -------------------------------------------------------------------------
+    // 内部转换工具
+    // -------------------------------------------------------------------------
+
+    private String toOkxInstId(String symbol) {
+        if (symbol == null || symbol.length() < 4) return symbol;
+        String base  = symbol.substring(0, symbol.length() - 4);
         String quote = symbol.substring(symbol.length() - 4);
         return base + "-" + quote;
     }
 
-    /**
-     * 将内部周期（如 1m, 5m, 1h）转换为 OKX 的 bar 参数。
-     */
     private String toOkxBar(String interval) {
         if (interval == null) return "1m";
         return switch (interval) {
             case "1m", "3m", "5m", "15m", "30m" -> interval;
-            case "1h" -> "1H";
-            case "2h" -> "2H";
-            case "4h" -> "4H";
-            case "6h" -> "6H";
+            case "1h"  -> "1H";
+            case "2h"  -> "2H";
+            case "4h"  -> "4H";
+            case "6h"  -> "6H";
             case "12h" -> "12H";
-            case "1d" -> "1D";
-            case "1w" -> "1W";
-            case "1M" -> "1M";
-            default -> "1m";
+            case "1d"  -> "1D";
+            case "1w"  -> "1W";
+            case "1M"  -> "1M";
+            default    -> "1m";
         };
-    }
-
-    /**
-     * 下单。
-     *
-     * <p>当前未实现；如需接入现货/合约下单，需要定义请求/响应 DTO 并完成签名鉴权。</p>
-     *
-     * @param request 下单请求
-     * @return 下单结果
-     * @throws UnsupportedOperationException 当前未实现
-     */
-    @Override
-    public Object placeOrder(Object request) {
-        throw new UnsupportedOperationException("Not implemented yet");
-    }
-
-    /**
-     * 查询账户余额/资产信息。
-     *
-     * @return 余额信息
-     * @throws UnsupportedOperationException 当前未实现
-     */
-    @Override
-    public Object getAccountBalance() {
-        throw new UnsupportedOperationException("Not implemented yet");
     }
 }

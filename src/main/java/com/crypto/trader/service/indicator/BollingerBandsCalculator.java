@@ -7,6 +7,7 @@ import org.ta4j.core.BaseBarSeries;
 import org.ta4j.core.indicators.SMAIndicator;
 import org.ta4j.core.indicators.bollinger.BollingerBandFacade;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Component
@@ -28,7 +29,8 @@ public class BollingerBandsCalculator implements IndicatorCalculator<BollingerBa
         if (klines.size() < 20) return null;
 
         BarSeries series = new BaseBarSeries();
-        klines.forEach(k -> series.addBar(k.getTimestamp(), k.getOpen().doubleValue(), k.getHigh().doubleValue(),
+        klines.forEach(k -> series.addBar(k.getTimestamp().atZone(ZoneOffset.UTC),
+                k.getOpen().doubleValue(), k.getHigh().doubleValue(),
                 k.getLow().doubleValue(), k.getClose().doubleValue(), k.getVolume().doubleValue()));
 
         ClosePriceIndicator close = new ClosePriceIndicator(series);

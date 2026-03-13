@@ -16,14 +16,26 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:your-email@gmail.com}
+    password: ${MAIL_PASSWORD:your-app-password}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
 
 crypto:
   watch-list: BTCUSDT, ETHUSDT, SOLUSDT
   exchange:
     binance:
-      api-key: ${BINANCE_API_KEY:your-binance-api-key}
-      secret-key: ${BINANCE_SECRET_KEY:your-binance-secret-key}
-      base-url: https://api.binance.com
+      api-key: ${OKX_API_KEY:your-okx-api-key}
+      secret-key: ${OKX_SECRET_KEY:your-okx-secret-key}
+      passphrase: ${OKX_PASSPHRASE:your-okx-passphrase}
+      base-url: https://www.okx.com
   glassnode:
     api-key: ${GLASSNODE_API_KEY:your-glassnode-api-key}
     base-url: https://api.glassnode.com
@@ -38,6 +50,9 @@ crypto:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:your-telegram-bot-token}
       chat-id: ${TELEGRAM_CHAT_ID:your-chat-id}
+    email:
+      from: ${MAIL_FROM:your-email@gmail.com}
+      to: ${MAIL_TO:recipient@example.com}
   trading:
     mode: paper  # paper or live
     max-position-size-usdt: 1000

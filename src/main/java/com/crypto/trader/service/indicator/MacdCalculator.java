@@ -6,6 +6,7 @@ import org.ta4j.core.BarSeries;
 import org.ta4j.core.BaseBarSeries;
 import org.ta4j.core.indicators.MACDIndicator;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Component
@@ -27,7 +28,8 @@ public class MacdCalculator implements IndicatorCalculator<MacdCalculator.MacdVa
         if (klines.size() < 30) return null;
 
         BarSeries series = new BaseBarSeries();
-        klines.forEach(k -> series.addBar(k.getTimestamp(), k.getOpen().doubleValue(), k.getHigh().doubleValue(),
+        klines.forEach(k -> series.addBar(k.getTimestamp().atZone(ZoneOffset.UTC),
+                k.getOpen().doubleValue(), k.getHigh().doubleValue(),
                 k.getLow().doubleValue(), k.getClose().doubleValue(), k.getVolume().doubleValue()));
 
         ClosePriceIndicator close = new ClosePriceIndicator(series);
