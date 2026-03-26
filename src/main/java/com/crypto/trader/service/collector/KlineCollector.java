@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -20,27 +21,33 @@ public class KlineCollector {
     private KlineRepository klineRepository;
 
     /**
-     * 拉取指定交易对的 K 线数据并持久化到数据库。
+     * 拉取指定交易对的 K 线数据并持久化到数据库（去重）。
      *
-     * <p>当前实现固定拉取最近 1 小时的数据区间（{@code now-1h ~ now}）。若交易所返回空列表则不落库。</p>
-     *
-     * <p>注意事项：</p>
-     * <ul>
-     *   <li>调度周期为 60 秒，但每次拉取 1 小时窗口，会与前一次窗口大量重叠；真实接入时应做去重/幂等（如 upsert）。</li>
-     *   <li>`Kline` 表当前的唯一索引是 {@code (symbol, timestamp)}，没有包含 interval；
-     *       因此同一 symbol 同一 timestamp 的不同 interval 会冲突（当前只采 1m 时问题不明显）。</li>
-     * </ul>
+     * <p>拉取最近 5 分钟的数据窗口（1m 级别约 5 根 K 线），通过唯一键判断跳过已存在的记录，
+     * 只保存新增数据，避免重复插入。</p>
      *
      * @param symbol   交易对（如 {@code BTCUSDT}）
      * @param interval 周期（如 {@code 1m}）
      */
     public void collect(String symbol, String interval) {
         Instant end = Instant.now();
-        Instant start = end.minusSeconds(60 * 60);
+        // 缩小拉取窗口为 5 分钟，减少不必要的重复数据
+        Instant start = end.minusSeconds(5 * 60);
         List<Kline> klines = exchangeClient.getKlines(symbol, interval, start.toEpochMilli(), end.toEpochMilli());
-        if (!klines.isEmpty()) {
-            klineRepository.saveAll(klines);
-            log.info("Saved {} klines for {}", klines.size(), symbol);
+        if (klines.isEmpty()) {
+            return;
+        }
+
+        // 过滤已存在的 K 线（基于唯一键去重）
+        List<Kline> newKlines = klines.stream()
+                .filter(k -> !klineRepository.existsBySymbolAndIntervalAndTimestamp(
+                        k.getSymbol(), k.getInterval(), k.getTimestamp()))
+                .collect(Collectors.toList());
+
+        if (!newKlines.isEmpty()) {
+            klineRepository.saveAll(newKlines);
+            log.info("Saved {} new klines for {} (fetched {}, skipped {} duplicates)",
+                    newKlines.size(), symbol, klines.size(), klines.size() - newKlines.size());
         }
     }
 }

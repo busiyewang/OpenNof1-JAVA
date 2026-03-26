@@ -6,8 +6,10 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
-@Table(name = "onchain_metrics", indexes = {
-        @Index(columnList = "symbol, metricName, timestamp", unique = true)
+@Table(name = "onchain_metrics", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_onchain_symbol_metric_ts", columnNames = {"symbol", "metric_name", "timestamp"})
+}, indexes = {
+        @Index(name = "idx_onchain_symbol_ts", columnList = "symbol, timestamp")
 })
 @Data
 public class OnChainMetric {
@@ -15,10 +17,15 @@ public class OnChainMetric {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false, length = 20)
     private String symbol;
+
+    @Column(name = "metric_name", nullable = false, length = 50)
     private String metricName;
+
+    @Column(nullable = false)
     private Instant timestamp;
 
-    @Column(precision = 30, scale = 8)
+    @Column(name = "metric_value", precision = 30, scale = 8)
     private BigDecimal value;
 }

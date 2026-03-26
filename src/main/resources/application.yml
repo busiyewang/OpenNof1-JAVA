@@ -31,7 +31,7 @@ spring:
 crypto:
   watch-list: BTCUSDT, ETHUSDT, SOLUSDT
   exchange:
-    binance:
+    okx:
       api-key: ${OKX_API_KEY:your-okx-api-key}
       secret-key: ${OKX_SECRET_KEY:your-okx-secret-key}
       passphrase: ${OKX_PASSPHRASE:your-okx-passphrase}

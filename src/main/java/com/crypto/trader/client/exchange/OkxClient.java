@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OKX 交易所客户端（类名保留 BinanceClient 以兼容现有注入配置）。
+ * OKX 交易所客户端。
  *
  * <p>公开接口（K 线查询）无需签名；私有接口（下单、查询余额）需要 HMAC-SHA256 签名。</p>
  *
@@ -34,25 +34,25 @@ import java.util.Map;
  */
 @Service
 @Slf4j
-public class BinanceClient implements ExchangeClient {
+public class OkxClient implements ExchangeClient {
 
     private WebClient webClient;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${crypto.exchange.binance.base-url}")
+    @Value("${crypto.exchange.okx.base-url}")
     private String baseUrl;
 
-    @Value("${crypto.exchange.binance.api-key:}")
+    @Value("${crypto.exchange.okx.api-key:}")
     private String apiKey;
 
-    @Value("${crypto.exchange.binance.secret-key:}")
+    @Value("${crypto.exchange.okx.secret-key:}")
     private String secretKey;
 
-    @Value("${crypto.exchange.binance.passphrase:}")
+    @Value("${crypto.exchange.okx.passphrase:}")
     private String passphrase;
 
-    public BinanceClient(WebClient.Builder webClientBuilder) {
+    public OkxClient(WebClient.Builder webClientBuilder) {
         this.webClientBuilder = webClientBuilder;
     }
 
@@ -132,21 +132,6 @@ public class BinanceClient implements ExchangeClient {
     // 私有接口（需要签名）
     // -------------------------------------------------------------------------
 
-    /**
-     * OKX 现货市价下单。
-     *
-     * <p>请求格式（Map）：</p>
-     * <ul>
-     *   <li>symbol      - 内部交易对，如 BTCUSDT</li>
-     *   <li>side        - buy / sell</li>
-     *   <li>type        - market（当前只支持市价单）</li>
-     *   <li>quoteQuantity - BUY 时花费的 USDT 金额（买单用 tgtCcy=quote_ccy）</li>
-     *   <li>quantity    - SELL 时卖出的基础货币数量</li>
-     * </ul>
-     *
-     * @param request Map&lt;String, Object&gt; 下单参数
-     * @return OKX 原始响应 Map；失败时抛出异常
-     */
     @Override
     @SuppressWarnings("unchecked")
     public Object placeOrder(Object request) {
@@ -156,20 +141,18 @@ public class BinanceClient implements ExchangeClient {
         Map<String, Object> req = (Map<String, Object>) request;
 
         String symbol = String.valueOf(req.get("symbol"));
-        String side   = String.valueOf(req.get("side"));   // buy / sell
+        String side   = String.valueOf(req.get("side"));
 
         Map<String, Object> body = new HashMap<>();
         body.put("instId", toOkxInstId(symbol));
-        body.put("tdMode", "cash");   // 现货交易
+        body.put("tdMode", "cash");
         body.put("side", side);
         body.put("ordType", "market");
 
         if ("buy".equalsIgnoreCase(side)) {
-            // 买入：sz 为花费的 USDT；tgtCcy=quote_ccy 告知 OKX sz 单位为报价货币
             body.put("sz", String.valueOf(req.getOrDefault("quoteQuantity", "100")));
             body.put("tgtCcy", "quote_ccy");
         } else {
-            // 卖出：sz 为卖出的基础货币数量
             body.put("sz", String.valueOf(req.getOrDefault("quantity", "0")));
         }
 
@@ -198,7 +181,6 @@ public class BinanceClient implements ExchangeClient {
             }
 
             log.info("OKX placeOrder success: side={} symbol={}", side, symbol);
-            // 返回第一条订单数据
             Object data = response.get("data");
             if (data instanceof List && !((List<?>) data).isEmpty()) {
                 return ((List<?>) data).get(0);
@@ -212,11 +194,6 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
-    /**
-     * 查询 OKX 账户余额（GET /api/v5/account/balance）。
-     *
-     * @return OKX 账户余额 Map
-     */
     @Override
     public Object getAccountBalance() {
         try {
@@ -253,15 +230,6 @@ public class BinanceClient implements ExchangeClient {
     // 签名工具
     // -------------------------------------------------------------------------
 
-    /**
-     * 计算 OKX REST API HMAC-SHA256 签名。
-     *
-     * @param timestamp   ISO-8601 时间戳（Instant.now().toString()）
-     * @param method      HTTP 方法大写（GET / POST）
-     * @param requestPath 路径（含查询参数，不含 host），例如 /api/v5/account/balance
-     * @param body        POST body JSON 字符串；GET 请求传空字符串
-     * @return Base64 编码的签名字符串
-     */
     private String sign(String timestamp, String method, String requestPath, String body) throws Exception {
         String preHash = timestamp + method + requestPath + body;
         Mac mac = Mac.getInstance("HmacSHA256");

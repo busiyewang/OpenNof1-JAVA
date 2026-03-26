@@ -44,7 +44,7 @@ public class RiskManager {
     public boolean isTradeAllowed(Signal signal) {
         // 1. 置信度过滤
         if (signal.getConfidence() < MIN_CONFIDENCE) {
-            log.warn("[RiskManager] Signal confidence {:.2f} below threshold {:.2f}, blocked",
+            log.warn("[RiskManager] Signal confidence {} below threshold {}, blocked",
                     signal.getConfidence(), MIN_CONFIDENCE);
             return false;
         }

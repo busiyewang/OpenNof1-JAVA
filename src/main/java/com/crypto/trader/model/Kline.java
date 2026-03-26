@@ -18,8 +18,10 @@ import java.time.Instant;
  * </ul>
  */
 @Entity
-@Table(name = "klines", indexes = {
-        @Index(columnList = "symbol, timestamp", unique = true)
+@Table(name = "klines", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_symbol_interval_timestamp", columnNames = {"symbol", "kline_interval", "timestamp"})
+}, indexes = {
+        @Index(name = "idx_symbol_timestamp", columnList = "symbol, timestamp")
 })
 @Data
 public class Kline {
@@ -27,26 +29,20 @@ public class Kline {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /**
-     * 交易对系统编码（例如 {@code BTCUSDT}），用于与交易所接口、数据库索引对齐。
-     */
+    @Column(nullable = false, length = 20)
     private String symbol;
 
-    /**
-     * 交易对中文名称（例如 {@code 比特币/USDT}）。
-     *
-     * <p>该字段仅用于展示与报表，不参与唯一索引；系统内部逻辑仍以 {@link #symbol} 作为唯一标识。</p>
-     */
+    @Column(length = 50)
     private String symbolName;
 
     /**
      * K 线周期：例如 {@code 1m}, {@code 5m}, {@code 1h} 等。
+     * 使用 kline_interval 避免 MySQL 保留字冲突。
      */
+    @Column(name = "kline_interval", nullable = false, length = 10)
     private String interval;
 
-    /**
-     * K 线时间戳：约定为该根 K 线的开盘时间（UTC）。
-     */
+    @Column(nullable = false)
     private Instant timestamp;
 
     @Column(precision = 20, scale = 8)
@@ -58,7 +54,7 @@ public class Kline {
     @Column(precision = 20, scale = 8)
     private BigDecimal low;
 
-    @Column(precision = 20, scale = 8)
+    @Column(name = "close_price", precision = 20, scale = 8)
     private BigDecimal close;
 
     @Column(precision = 20, scale = 8)
