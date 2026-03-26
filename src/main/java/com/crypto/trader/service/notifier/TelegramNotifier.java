@@ -47,6 +47,12 @@ public class TelegramNotifier implements Notifier {
     }
 
     @Override
+    public void notify(String subject, String message) {
+        // Telegram 不区分标题，合并发送
+        notify(subject + "\n\n" + message);
+    }
+
+    @Override
     public void notify(String message) {
         if (!StringUtils.hasText(botToken) || botToken.startsWith("your-")
                 || !StringUtils.hasText(chatId) || chatId.startsWith("your-")) {

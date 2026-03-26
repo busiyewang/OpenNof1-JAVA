@@ -32,7 +32,10 @@ public class StrategyScheduler {
      * </ul>
      * </p>
      */
-    @Scheduled(fixedDelay = 60000)
+    /**
+     * 每 5 分钟执行一次策略评估（上一轮完成后延迟 5 分钟）。
+     */
+    @Scheduled(fixedDelay = 300000)
     public void runStrategies() {
         watchList.parallelStream().forEach(strategyExecutor::execute);
     }

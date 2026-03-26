@@ -9,20 +9,10 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-/**
- * 邮件通知器。
- *
- * <p>使用 Spring {@link JavaMailSender} 发送交易信号邮件。
- * 若邮件服务未配置（spring.mail.host 未设置），JavaMailSender bean 不会创建，
- * 此时注入为 null，通知器自动降级为仅打印日志。</p>
- *
- * <p>环境变量：MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM, MAIL_TO</p>
- */
 @Service
 @Slf4j
 public class EmailNotifier implements Notifier {
 
-    /** JavaMailSender 可能未配置，允许为 null（@Autowired required=false）。 */
     @Autowired(required = false)
     private JavaMailSender mailSender;
 
@@ -50,6 +40,11 @@ public class EmailNotifier implements Notifier {
     @Override
     public void notify(String message) {
         sendEmail("交易机器人通知", message);
+    }
+
+    @Override
+    public void notify(String subject, String message) {
+        sendEmail(subject, message);
     }
 
     private void sendEmail(String subject, String body) {
