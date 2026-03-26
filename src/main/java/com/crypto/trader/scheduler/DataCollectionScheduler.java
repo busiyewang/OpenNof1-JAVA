@@ -33,13 +33,25 @@ public class DataCollectionScheduler {
      */
     @Scheduled(fixedDelay = 60000)
     public void collectKlines() {
+        log.info("========== [数据采集] K线回补任务开始，交易对: {} ==========", watchList);
+        long startTime = System.currentTimeMillis();
+        int successCount = 0;
+        int failCount = 0;
+
         for (String symbol : watchList) {
             try {
+                log.info("[数据采集] 开始回补K线: {}", symbol);
                 klineCollector.collect(symbol, "1m");
+                successCount++;
             } catch (Exception e) {
-                log.error("Error collecting klines for {}", symbol, e);
+                failCount++;
+                log.error("[数据采集] K线回补失败: {} 错误: {}", symbol, e.getMessage(), e);
             }
         }
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        log.info("========== [数据采集] K线回补任务结束，成功: {}, 失败: {}, 耗时: {}ms ==========",
+                successCount, failCount, elapsed);
     }
 
     /**
@@ -51,12 +63,24 @@ public class DataCollectionScheduler {
      */
     @Scheduled(cron = "0 0 */1 * * ?")
     public void collectOnChainMetrics() {
+        log.info("========== [数据采集] 链上指标采集任务开始，交易对: {} ==========", watchList);
+        long startTime = System.currentTimeMillis();
+        int successCount = 0;
+        int failCount = 0;
+
         for (String symbol : watchList) {
             try {
+                log.info("[数据采集] 开始采集链上指标: {}", symbol);
                 onChainCollector.collectWhaleMetrics(symbol);
+                successCount++;
             } catch (Exception e) {
-                log.error("Error collecting on-chain metrics for {}", symbol, e);
+                failCount++;
+                log.error("[数据采集] 链上指标采集失败: {} 错误: {}", symbol, e.getMessage(), e);
             }
         }
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        log.info("========== [数据采集] 链上指标采集结束，成功: {}, 失败: {}, 耗时: {}ms ==========",
+                successCount, failCount, elapsed);
     }
 }

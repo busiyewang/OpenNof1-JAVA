@@ -11,7 +11,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -39,18 +38,37 @@ public class McpPredictionStrategy implements TradingStrategy {
      */
     @Override
     public Signal evaluate(String symbol, List<Kline> klines, List<OnChainMetric> onChainData) {
-        if (!mcpEnabled || klines.isEmpty()) {
+        if (!mcpEnabled) {
+            log.info("[MCP] {} DeepSeek 未启用 (crypto.mcp.enabled=false)，返回 HOLD", symbol);
+            return holdSignal(symbol);
+        }
+        if (klines.isEmpty()) {
+            log.warn("[MCP] {} K线数据为空，返回 HOLD", symbol);
             return holdSignal(symbol);
         }
 
         try {
-            // 构建提示词：将最近 K 线和链上数据摘要发送给大模型
-            String prompt = buildPrompt(symbol, klines, onChainData);
-            String prediction = mcpClient.predict(prompt);
+            log.info("[MCP] {} 开始调用 DeepSeek 预测...", symbol);
+            long t0 = System.currentTimeMillis();
 
-            // 解析预测结果，期望模型返回类似 "BUY", "SELL", "HOLD" 的文本
+            String prompt = buildPrompt(symbol, klines, onChainData);
+            log.debug("[MCP] {} Prompt 长度: {} 字符", symbol, prompt.length());
+
+            String prediction = mcpClient.predict(prompt);
+            long elapsed = System.currentTimeMillis() - t0;
+
+            if (prediction == null || prediction.isEmpty()) {
+                log.warn("[MCP] {} DeepSeek 返回空响应，耗时: {}ms，返回 HOLD", symbol, elapsed);
+                return holdSignal(symbol);
+            }
+
+            log.info("[MCP] {} DeepSeek 响应 (耗时: {}ms): {}", symbol, elapsed,
+                    prediction.substring(0, Math.min(100, prediction.length())));
+
             Signal.Action action = parsePrediction(prediction);
-            double confidence = extractConfidence(prediction); // 简单从文本提取置信度
+            double confidence = extractConfidence(prediction);
+
+            log.info("[MCP] {} 解析结果: 动作={}, 置信度={}", symbol, action, confidence);
 
             return Signal.builder()
                     .symbol(symbol)
@@ -62,7 +80,7 @@ public class McpPredictionStrategy implements TradingStrategy {
                     .reason("MCP prediction: " + prediction.substring(0, Math.min(50, prediction.length())))
                     .build();
         } catch (Exception e) {
-            log.error("MCP prediction failed for {}", symbol, e);
+            log.error("[MCP] {} DeepSeek 预测失败: {}", symbol, e.getMessage(), e);
             return holdSignal(symbol);
         }
     }
@@ -79,7 +97,6 @@ public class McpPredictionStrategy implements TradingStrategy {
      * @return prompt 文本
      */
     private String buildPrompt(String symbol, List<Kline> klines, List<OnChainMetric> onChainData) {
-        // 取最近5条K线
         List<Kline> recent = klines.subList(Math.max(0, klines.size()-5), klines.size());
         StringBuilder sb = new StringBuilder();
         sb.append("You are a crypto trading assistant. Given the following market data for ")
@@ -121,11 +138,11 @@ public class McpPredictionStrategy implements TradingStrategy {
             String lower = text.toLowerCase();
             int idx = lower.indexOf("confidence:");
             if (idx >= 0) {
-                String part = lower.substring(idx + 11).trim().split("\\s+")[0];
+                String part = lower.substring(idx + 11).trim().split("[\\s,]+")[0];
                 return Double.parseDouble(part);
             }
         } catch (Exception e) {
-            // ignore
+            log.debug("[MCP] 置信度解析失败，使用默认值 0.5");
         }
         return 0.5;
     }

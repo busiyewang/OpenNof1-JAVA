@@ -4,12 +4,14 @@ import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.indicator.BollingerBandsCalculator;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
 @Component
+@Slf4j
 public class BollingerStrategy implements TradingStrategy {
 
     @Autowired
@@ -33,11 +35,18 @@ public class BollingerStrategy implements TradingStrategy {
     @Override
     public Signal evaluate(String symbol, List<Kline> klines, List<OnChainMetric> onChainData) {
         var bb = bollingerCalculator.calculate(klines);
-        if (bb == null) return holdSignal(symbol);
+        if (bb == null) {
+            log.debug("[Bollinger] {} 布林带计算返回 null（数据不足），返回 HOLD", symbol);
+            return holdSignal(symbol);
+        }
 
         double lastClose = klines.get(klines.size()-1).getClose().doubleValue();
+        log.info("[Bollinger] {} 指标值: 上轨={} 中轨={} 下轨={} 收盘价={}",
+                symbol, String.format("%.2f", bb.upper), String.format("%.2f", bb.middle),
+                String.format("%.2f", bb.lower), String.format("%.2f", lastClose));
 
         if (lastClose > bb.upper) {
+            log.info("[Bollinger] {} 价格突破上轨（超买）-> SELL", symbol);
             return Signal.builder()
                     .symbol(symbol)
                     .timestamp(Instant.now())
@@ -48,6 +57,7 @@ public class BollingerStrategy implements TradingStrategy {
                     .reason("Price above upper Bollinger Band")
                     .build();
         } else if (lastClose < bb.lower) {
+            log.info("[Bollinger] {} 价格跌破下轨（超卖）-> BUY", symbol);
             return Signal.builder()
                     .symbol(symbol)
                     .timestamp(Instant.now())
@@ -58,6 +68,8 @@ public class BollingerStrategy implements TradingStrategy {
                     .reason("Price below lower Bollinger Band")
                     .build();
         }
+
+        log.debug("[Bollinger] {} 价格在布林带内 -> HOLD", symbol);
         return holdSignal(symbol);
     }
 

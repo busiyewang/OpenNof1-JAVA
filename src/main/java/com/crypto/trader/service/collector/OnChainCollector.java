@@ -30,12 +30,21 @@ public class OnChainCollector {
      * @param symbol 标的（传入形式取决于上游约定：可能是资产代码或交易对）
      */
     public void collectWhaleMetrics(String symbol) {
+        log.info("[链上采集] {} 开始采集鲸鱼指标...", symbol);
+        long t0 = System.currentTimeMillis();
+
         Instant to = Instant.now();
         Instant from = to.minusSeconds(24 * 60 * 60);
+        log.info("[链上采集] {} 时间范围: {} ~ {}", symbol, from, to);
+
         List<OnChainMetric> metrics = glassnodeClient.getWhaleTransactionCount(symbol, from, to);
-        if (!metrics.isEmpty()) {
+        long elapsed = System.currentTimeMillis() - t0;
+
+        if (metrics.isEmpty()) {
+            log.warn("[链上采集] {} Glassnode 返回空数据，耗时: {}ms", symbol, elapsed);
+        } else {
             metricRepository.saveAll(metrics);
-            log.info("Saved {} whale metrics for {}", metrics.size(), symbol);
+            log.info("[链上采集] {} 保存 {} 条鲸鱼指标，耗时: {}ms", symbol, metrics.size(), elapsed);
         }
     }
 }

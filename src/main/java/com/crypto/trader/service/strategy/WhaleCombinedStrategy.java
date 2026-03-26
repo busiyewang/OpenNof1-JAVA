@@ -5,12 +5,14 @@ import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.analyzer.WhaleAnalyzer;
 import com.crypto.trader.service.indicator.MacdCalculator;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
 @Component
+@Slf4j
 public class WhaleCombinedStrategy implements TradingStrategy {
 
     @Autowired
@@ -36,10 +38,19 @@ public class WhaleCombinedStrategy implements TradingStrategy {
      */
     @Override
     public Signal evaluate(String symbol, List<Kline> klines, List<OnChainMetric> onChainData) {
+        log.info("[WhaleCombined] {} 开始分析鲸鱼活动...", symbol);
         int whaleSignal = whaleAnalyzer.analyzeWhaleActivity(symbol);
         var macd = macdCalculator.calculate(klines);
 
+        String whaleDesc = whaleSignal == 1 ? "积累" : whaleSignal == -1 ? "派发" : "中性";
+        String macdDesc = macd == null ? "无数据" :
+                macd.macd > macd.signal ? "偏多" : "偏空";
+
+        log.info("[WhaleCombined] {} 鲸鱼信号: {} ({}), MACD方向: {}",
+                symbol, whaleSignal, whaleDesc, macdDesc);
+
         if (whaleSignal == 1 && macd != null && macd.macd > macd.signal) {
+            log.info("[WhaleCombined] {} 鲸鱼积累 + MACD偏多 -> BUY (置信度: 0.85)", symbol);
             return Signal.builder()
                     .symbol(symbol)
                     .timestamp(Instant.now())
@@ -50,6 +61,7 @@ public class WhaleCombinedStrategy implements TradingStrategy {
                     .reason("Whale accumulation + MACD bullish")
                     .build();
         } else if (whaleSignal == -1 && macd != null && macd.macd < macd.signal) {
+            log.info("[WhaleCombined] {} 鲸鱼派发 + MACD偏空 -> SELL (置信度: 0.85)", symbol);
             return Signal.builder()
                     .symbol(symbol)
                     .timestamp(Instant.now())
@@ -60,6 +72,8 @@ public class WhaleCombinedStrategy implements TradingStrategy {
                     .reason("Whale distribution + MACD bearish")
                     .build();
         }
+
+        log.debug("[WhaleCombined] {} 鲸鱼与MACD未形成共振 -> HOLD", symbol);
         return holdSignal(symbol);
     }
 
@@ -78,9 +92,6 @@ public class WhaleCombinedStrategy implements TradingStrategy {
                 .build();
     }
 
-    /**
-     * @return 策略名称
-     */
     @Override
     public String getName() {
         return "WhaleCombined";

@@ -42,12 +42,15 @@ public class RiskManager {
      * @return true 表示允许下单，false 表示被风控拦截
      */
     public boolean isTradeAllowed(Signal signal) {
+        log.info("[风控] {} 检查信号: {} 置信度={} 策略={}",
+                signal.getSymbol(), signal.getAction(), signal.getConfidence(), signal.getStrategyName());
+
         // 1. 置信度过滤
         if (signal.getConfidence() < MIN_CONFIDENCE) {
-            log.warn("[RiskManager] Signal confidence {} below threshold {}, blocked",
-                    signal.getConfidence(), MIN_CONFIDENCE);
+            log.warn("[风控] {} 置信度 {} < 阈值 {}，拦截", signal.getSymbol(), signal.getConfidence(), MIN_CONFIDENCE);
             return false;
         }
+        log.info("[风控] {} 置信度检查通过: {} >= {}", signal.getSymbol(), signal.getConfidence(), MIN_CONFIDENCE);
 
         // 2. 日内交易次数限制
         Instant startOfDay = LocalDate.now(ZoneOffset.UTC)
@@ -55,11 +58,12 @@ public class RiskManager {
                 .toInstant();
         long todayTrades = tradeRecordRepository.countByTimestampAfter(startOfDay);
         if (todayTrades >= maxDailyTrades) {
-            log.warn("[RiskManager] Daily trade limit reached: {}/{}, blocked for {}",
-                    todayTrades, maxDailyTrades, signal.getSymbol());
+            log.warn("[风控] {} 今日交易次数 {}/{} 已达上限，拦截", signal.getSymbol(), todayTrades, maxDailyTrades);
             return false;
         }
+        log.info("[风控] {} 日内交易次数检查通过: {}/{}", signal.getSymbol(), todayTrades, maxDailyTrades);
 
+        log.info("[风控] {} 所有风控检查通过，允许交易", signal.getSymbol());
         return true;
     }
 

@@ -37,6 +37,19 @@ public class StrategyScheduler {
      */
     @Scheduled(fixedDelay = 300000)
     public void runStrategies() {
-        watchList.parallelStream().forEach(strategyExecutor::execute);
+        log.info("========== [策略调度] 开始执行策略评估，交易对: {} ==========", watchList);
+        long startTime = System.currentTimeMillis();
+
+        watchList.parallelStream().forEach(symbol -> {
+            try {
+                strategyExecutor.execute(symbol);
+            } catch (Exception e) {
+                log.error("[策略调度] {} 策略执行异常: {}", symbol, e.getMessage(), e);
+            }
+        });
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        log.info("========== [策略调度] 策略评估结束，交易对数: {}, 耗时: {}ms ==========",
+                watchList.size(), elapsed);
     }
 }

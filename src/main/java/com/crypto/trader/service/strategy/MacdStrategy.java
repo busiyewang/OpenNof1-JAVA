@@ -4,12 +4,14 @@ import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.indicator.MacdCalculator;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
 @Component
+@Slf4j
 public class MacdStrategy implements TradingStrategy {
 
     @Autowired
@@ -33,9 +35,17 @@ public class MacdStrategy implements TradingStrategy {
     @Override
     public Signal evaluate(String symbol, List<Kline> klines, List<OnChainMetric> onChainData) {
         var macd = macdCalculator.calculate(klines);
-        if (macd == null) return holdSignal(symbol);
+        if (macd == null) {
+            log.debug("[MACD] {} MACD 计算返回 null（K线数据不足），返回 HOLD", symbol);
+            return holdSignal(symbol);
+        }
+
+        log.info("[MACD] {} 指标值: MACD={} Signal={} Histogram={}",
+                symbol, String.format("%.6f", macd.macd), String.format("%.6f", macd.signal),
+                String.format("%.6f", macd.histogram));
 
         if (macd.macd > macd.signal && macd.histogram > 0) {
+            log.info("[MACD] {} 金叉信号: MACD > Signal 且 Histogram > 0 -> BUY", symbol);
             return Signal.builder()
                     .symbol(symbol)
                     .timestamp(Instant.now())
@@ -46,6 +56,7 @@ public class MacdStrategy implements TradingStrategy {
                     .reason("MACD positive crossing")
                     .build();
         } else if (macd.macd < macd.signal && macd.histogram < 0) {
+            log.info("[MACD] {} 死叉信号: MACD < Signal 且 Histogram < 0 -> SELL", symbol);
             return Signal.builder()
                     .symbol(symbol)
                     .timestamp(Instant.now())
@@ -56,6 +67,8 @@ public class MacdStrategy implements TradingStrategy {
                     .reason("MACD negative crossing")
                     .build();
         }
+
+        log.debug("[MACD] {} 无明确信号 -> HOLD", symbol);
         return holdSignal(symbol);
     }
 
