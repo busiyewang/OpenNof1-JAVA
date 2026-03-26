@@ -31,11 +31,11 @@ crypto:
 
   mcp:
     enabled: false
-    provider: openai
-    api-key: ${MCP_API_KEY:}
-    base-url: https://api.openai.com/v1/chat/completions
-    model: gpt-4
-    timeout-seconds: 30
+    provider: deepseek
+    api-key: ${DEEPSEEK_API_KEY:}
+    base-url: https://api.deepseek.com/v1/chat/completions
+    model: deepseek-chat
+    timeout-seconds: 60
 
   notifier:
     telegram:
