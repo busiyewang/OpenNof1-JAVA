@@ -7,12 +7,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
 import javax.annotation.PostConstruct;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -21,26 +25,17 @@ import java.util.*;
 /**
  * OKX 交易所 REST API 客户端。
  *
- * <h3>签名规则（私有接口）</h3>
+ * <h3>签名规则</h3>
  * <pre>
- *   preHash  = timestamp + method + requestPath + body
- *   sign     = Base64( HmacSHA256( preHash, SecretKey ) )
+ *   preHash = timestamp + method + requestPath + body
+ *   sign    = Base64( HmacSHA256( preHash, SecretKey ) )
  * </pre>
- * <ul>
- *   <li>timestamp: ISO-8601 UTC 含毫秒，如 {@code 2020-12-08T09:08:57.715Z}</li>
- *   <li>method: 大写 GET / POST</li>
- *   <li>requestPath: 含查询参数的路径，如 {@code /api/v5/account/balance?ccy=BTC}</li>
- *   <li>body: POST 请求的 JSON 字符串；GET 请求无 body</li>
- * </ul>
  *
- * <h3>请求头（私有接口）</h3>
- * <ul>
- *   <li>OK-ACCESS-KEY: APIKey</li>
- *   <li>OK-ACCESS-SIGN: 签名</li>
- *   <li>OK-ACCESS-TIMESTAMP: ISO 时间戳</li>
- *   <li>OK-ACCESS-PASSPHRASE: 创建 API 时设置的 Passphrase</li>
- *   <li>Content-Type: application/json</li>
- * </ul>
+ * <h3>必需请求头</h3>
+ * OK-ACCESS-KEY / OK-ACCESS-SIGN / OK-ACCESS-TIMESTAMP / OK-ACCESS-PASSPHRASE
+ * 模拟盘额外: x-simulated-trading: 1
+ *
+ * @see <a href="https://www.okx.com/docs-v5/zh/#overview-rest-authentication-signature">OKX 签名文档</a>
  */
 @Service
 @Slf4j
@@ -50,9 +45,12 @@ public class OkxClient implements ExchangeClient {
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** OKX 要求的 ISO-8601 UTC 时间戳格式，含毫秒 */
+    /** OKX ISO-8601 UTC 时间戳格式（含毫秒）：2020-12-08T09:08:57.715Z */
     private static final DateTimeFormatter TIMESTAMP_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
+
+    /** 单次请求超时 */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
 
     @Value("${crypto.exchange.okx.base-url}")
     private String baseUrl;
@@ -66,6 +64,10 @@ public class OkxClient implements ExchangeClient {
     @Value("${crypto.exchange.okx.passphrase:}")
     private String passphrase;
 
+    /** 是否为模拟盘 */
+    @Value("${crypto.exchange.okx.simulated:false}")
+    private boolean simulated;
+
     public OkxClient(WebClient.Builder webClientBuilder) {
         this.webClientBuilder = webClientBuilder;
     }
@@ -73,6 +75,10 @@ public class OkxClient implements ExchangeClient {
     @PostConstruct
     public void init() {
         this.webClient = webClientBuilder.baseUrl(baseUrl).build();
+        log.info("[OKX REST] 初始化完成: baseUrl={}, simulated={}, apiKey={}...{}",
+                baseUrl, simulated,
+                apiKey.length() > 8 ? apiKey.substring(0, 8) : "***",
+                apiKey.length() > 4 ? apiKey.substring(apiKey.length() - 4) : "***");
     }
 
     // =========================================================================
@@ -81,10 +87,12 @@ public class OkxClient implements ExchangeClient {
 
     @Override
     public List<Kline> getKlines(String symbol, String interval, long startTime, long endTime) {
-        try {
-            String instId = toOkxInstId(symbol);
-            String bar = toOkxBar(interval);
+        String instId = toOkxInstId(symbol);
+        String bar = toOkxBar(interval);
 
+        log.info("[OKX REST] 获取K线: instId={}, bar={}, after={}, before={}", instId, bar, startTime, endTime);
+
+        try {
             @SuppressWarnings("unchecked")
             Map<String, Object> response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -97,10 +105,15 @@ public class OkxClient implements ExchangeClient {
                     .header("Content-Type", "application/json")
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(REQUEST_TIMEOUT)
+                    .doOnError(WebClientRequestException.class, e ->
+                            log.error("[OKX REST] K线请求连接失败: {}", e.getMessage()))
+                    .doOnError(WebClientResponseException.class, e ->
+                            log.error("[OKX REST] K线请求HTTP错误: status={} body={}", e.getStatusCode(), e.getResponseBodyAsString()))
                     .block();
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
-                log.warn("OKX getKlines failed for {}:{} response={}", symbol, interval, response);
+                log.warn("[OKX REST] K线响应异常: {}:{} response={}", symbol, interval, response);
                 return List.of();
             }
 
@@ -117,30 +130,23 @@ public class OkxClient implements ExchangeClient {
                 List<?> arr = (List<?>) item;
                 if (arr.size() < 6) continue;
 
-                // OKX candles: [ ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm ]
                 long ts = Long.parseLong(String.valueOf(arr.get(0)));
-                BigDecimal open   = new BigDecimal(String.valueOf(arr.get(1)));
-                BigDecimal high   = new BigDecimal(String.valueOf(arr.get(2)));
-                BigDecimal low    = new BigDecimal(String.valueOf(arr.get(3)));
-                BigDecimal close  = new BigDecimal(String.valueOf(arr.get(4)));
-                BigDecimal volume = new BigDecimal(String.valueOf(arr.get(5)));
-
                 Kline k = new Kline();
                 k.setSymbol(symbol);
                 k.setInterval(interval);
                 k.setTimestamp(Instant.ofEpochMilli(ts));
-                k.setOpen(open);
-                k.setHigh(high);
-                k.setLow(low);
-                k.setClose(close);
-                k.setVolume(volume);
+                k.setOpen(new BigDecimal(String.valueOf(arr.get(1))));
+                k.setHigh(new BigDecimal(String.valueOf(arr.get(2))));
+                k.setLow(new BigDecimal(String.valueOf(arr.get(3))));
+                k.setClose(new BigDecimal(String.valueOf(arr.get(4))));
+                k.setVolume(new BigDecimal(String.valueOf(arr.get(5))));
                 result.add(k);
             }
 
-            log.debug("OKX getKlines {}:{} returned {} candles", symbol, interval, result.size());
+            log.info("[OKX REST] K线获取成功: {}:{} 返回 {} 条", symbol, interval, result.size());
             return result;
         } catch (Exception e) {
-            log.error("Error fetching klines from OKX for {}:{}", symbol, interval, e);
+            log.error("[OKX REST] K线获取异常: {}:{} error={}", symbol, interval, e.getMessage(), e);
             return List.of();
         }
     }
@@ -149,12 +155,6 @@ public class OkxClient implements ExchangeClient {
     // 私有接口（需要签名）
     // =========================================================================
 
-    /**
-     * OKX 现货市价下单（POST /api/v5/trade/order）。
-     *
-     * @param request Map 包含 symbol, side, type, quoteQuantity/quantity
-     * @return OKX 原始响应 data 对象
-     */
     @Override
     @SuppressWarnings("unchecked")
     public Object placeOrder(Object request) {
@@ -166,7 +166,6 @@ public class OkxClient implements ExchangeClient {
         String symbol = String.valueOf(req.get("symbol"));
         String side   = String.valueOf(req.get("side"));
 
-        // 构建 OKX 下单请求体
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("instId", toOkxInstId(symbol));
         body.put("tdMode", "cash");
@@ -187,23 +186,26 @@ public class OkxClient implements ExchangeClient {
             String timestamp = generateTimestamp();
             String sign = sign(timestamp, "POST", requestPath, bodyJson);
 
-            @SuppressWarnings("unchecked")
+            log.info("[OKX REST] 下单请求: {} {} body={}", side.toUpperCase(), symbol, bodyJson);
+
             Map<String, Object> response = webClient.post()
                     .uri(requestPath)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(h -> setPrivateHeaders(h, apiKey, sign, timestamp, passphrase))
+                    .headers(h -> setPrivateHeaders(h, sign, timestamp))
                     .bodyValue(bodyJson)
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(REQUEST_TIMEOUT)
                     .block();
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 String msg = response != null ? String.valueOf(response.get("msg")) : "null response";
                 String code = response != null ? String.valueOf(response.get("code")) : "null";
+                log.error("[OKX REST] 下单失败: code={} msg={}", code, msg);
                 throw new RuntimeException("OKX placeOrder failed: code=" + code + " msg=" + msg);
             }
 
-            log.info("OKX placeOrder success: side={} symbol={}", side, symbol);
+            log.info("[OKX REST] 下单成功: {} {}", side, symbol);
             Object data = response.get("data");
             if (data instanceof List && !((List<?>) data).isEmpty()) {
                 return ((List<?>) data).get(0);
@@ -217,46 +219,41 @@ public class OkxClient implements ExchangeClient {
         }
     }
 
-    /**
-     * 查询 OKX 账户余额（GET /api/v5/account/balance）。
-     */
     @Override
     public Object getAccountBalance() {
         return getAccountBalance(null);
     }
 
-    /**
-     * 查询 OKX 账户余额，可指定币种。
-     *
-     * @param ccy 币种，如 "BTC" 或 "USDT"；null 查全部
-     */
     public Object getAccountBalance(String ccy) {
         String requestPath = "/api/v5/account/balance";
-        // GET 请求查询参数是 requestPath 的一部分（用于签名）
         if (ccy != null && !ccy.isEmpty()) {
             requestPath += "?ccy=" + ccy;
         }
 
         try {
             String timestamp = generateTimestamp();
-            // GET 请求：签名包含完整 requestPath（含查询参数），body 为空
             String sign = sign(timestamp, "GET", requestPath, "");
+
+            log.info("[OKX REST] 查询余额: path={}", requestPath);
 
             final String finalPath = requestPath;
             @SuppressWarnings("unchecked")
             Map<String, Object> response = webClient.get()
                     .uri(finalPath)
-                    .headers(h -> setPrivateHeaders(h, apiKey, sign, timestamp, passphrase))
+                    .headers(h -> setPrivateHeaders(h, sign, timestamp))
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(REQUEST_TIMEOUT)
                     .block();
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 String msg = response != null ? String.valueOf(response.get("msg")) : "null response";
                 String code = response != null ? String.valueOf(response.get("code")) : "null";
+                log.error("[OKX REST] 查询余额失败: code={} msg={}", code, msg);
                 throw new RuntimeException("OKX getAccountBalance failed: code=" + code + " msg=" + msg);
             }
 
+            log.info("[OKX REST] 查询余额成功");
             return response.get("data");
         } catch (RuntimeException e) {
             throw e;
@@ -265,13 +262,6 @@ public class OkxClient implements ExchangeClient {
         }
     }
 
-    /**
-     * 查询订单详情（GET /api/v5/trade/order）。
-     *
-     * @param instId 产品 ID，如 BTC-USDT
-     * @param ordId  订单 ID
-     * @return 订单信息
-     */
     public Object getOrderDetail(String instId, String ordId) {
         String requestPath = "/api/v5/trade/order?instId=" + instId + "&ordId=" + ordId;
 
@@ -282,9 +272,10 @@ public class OkxClient implements ExchangeClient {
             @SuppressWarnings("unchecked")
             Map<String, Object> response = webClient.get()
                     .uri(requestPath)
-                    .headers(h -> setPrivateHeaders(h, apiKey, sign, timestamp, passphrase))
+                    .headers(h -> setPrivateHeaders(h, sign, timestamp))
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(REQUEST_TIMEOUT)
                     .block();
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
@@ -308,27 +299,16 @@ public class OkxClient implements ExchangeClient {
     // 签名 & 请求头
     // =========================================================================
 
-    /**
-     * 生成 OKX 要求的 ISO-8601 UTC 时间戳（含毫秒）。
-     * 示例: {@code 2020-12-08T09:08:57.715Z}
-     */
     private String generateTimestamp() {
         return TIMESTAMP_FMT.format(Instant.now());
     }
 
     /**
-     * 计算 OKX REST API HMAC-SHA256 签名。
-     *
-     * <pre>sign = Base64( HmacSHA256( timestamp + method + requestPath + body, SecretKey ) )</pre>
-     *
-     * @param timestamp   ISO-8601 时间戳
-     * @param method      HTTP 方法大写：GET / POST
-     * @param requestPath 请求路径（GET 请求含查询参数，如 /api/v5/account/balance?ccy=BTC）
-     * @param body        POST body JSON 字符串；GET 请求传空字符串
-     * @return Base64 编码的签名字符串
+     * sign = Base64( HmacSHA256( timestamp + method + requestPath + body, SecretKey ) )
      */
     private String sign(String timestamp, String method, String requestPath, String body) throws Exception {
         String preHash = timestamp + method + requestPath + body;
+        log.debug("[OKX REST] 签名 preHash: {}{}{}<body...>", timestamp, method, requestPath);
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         byte[] hash = mac.doFinal(preHash.getBytes(StandardCharsets.UTF_8));
@@ -336,15 +316,19 @@ public class OkxClient implements ExchangeClient {
     }
 
     /**
-     * 设置 OKX 私有接口请求头。
+     * 设置 OKX 私有接口必需的请求头。
+     * 模拟盘时额外添加 x-simulated-trading: 1
      */
     private void setPrivateHeaders(org.springframework.http.HttpHeaders headers,
-                                   String key, String sign, String timestamp, String pass) {
-        headers.set("OK-ACCESS-KEY", key);
+                                   String sign, String timestamp) {
+        headers.set("OK-ACCESS-KEY", apiKey);
         headers.set("OK-ACCESS-SIGN", sign);
         headers.set("OK-ACCESS-TIMESTAMP", timestamp);
-        headers.set("OK-ACCESS-PASSPHRASE", pass);
+        headers.set("OK-ACCESS-PASSPHRASE", passphrase);
         headers.set("Content-Type", "application/json");
+        if (simulated) {
+            headers.set("x-simulated-trading", "1");
+        }
     }
 
     // =========================================================================
@@ -359,7 +343,7 @@ public class OkxClient implements ExchangeClient {
         return base + "-" + quote;
     }
 
-    /** 内部周期标识 -> OKX bar 参数 */
+    /** 内部周期 -> OKX bar 参数 */
     String toOkxBar(String interval) {
         if (interval == null) return "1m";
         return switch (interval) {

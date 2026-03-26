@@ -2,7 +2,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/crypto_trader?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&useSSL=false
     username: root
-    password: root
+    password: Root1234
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -17,25 +17,29 @@ spring:
     serialization:
       write-dates-as-timestamps: false
   mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
-    port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:your-email@gmail.com}
-    password: ${MAIL_PASSWORD:your-app-password}
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:2900115167@qq.com}
+    password: ${MAIL_PASSWORD:your-qq-authorization-code}
     properties:
       mail:
         smtp:
           auth: true
-          starttls:
+          ssl:
             enable: true
+          starttls:
+            enable: false
 
 crypto:
-  watch-list: BTCUSDT, ETHUSDT, SOLUSDT
+#  , ETHUSDT, SOLUSDT
+  watch-list: BTCUSDT
   exchange:
     okx:
       api-key: ${OKX_API_KEY:your-okx-api-key}
       secret-key: ${OKX_SECRET_KEY:your-okx-secret-key}
       passphrase: ${OKX_PASSPHRASE:your-okx-passphrase}
       base-url: https://www.okx.com
+      simulated: false  # true 启用模拟盘（demo trading）
   glassnode:
     api-key: ${GLASSNODE_API_KEY:your-glassnode-api-key}
     base-url: https://api.glassnode.com
@@ -51,8 +55,12 @@ crypto:
       bot-token: ${TELEGRAM_BOT_TOKEN:your-telegram-bot-token}
       chat-id: ${TELEGRAM_CHAT_ID:your-chat-id}
     email:
-      from: ${MAIL_FROM:your-email@gmail.com}
-      to: ${MAIL_TO:recipient@example.com}
+      from: ${MAIL_FROM:2900115167@qq.com}
+      to: ${MAIL_TO:2900115167@qq.com}
+  proxy:
+    enabled: ${PROXY_ENABLED:true}
+    host: ${PROXY_HOST:127.0.0.1}
+    port: ${PROXY_PORT:7890}
   trading:
     mode: paper  # paper or live
     max-position-size-usdt: 1000

@@ -2,7 +2,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/crypto_trader?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&useSSL=false
     username: root
-    password: my-secret-pw
+    password: Root1234
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -16,23 +16,24 @@ spring:
 
 crypto:
   # 关注交易对（策略执行与数据采集都会用到）
-  watch-list: BTCUSDT, ETHUSDT, SOLUSDT
+#  watch-list: BTCUSDT, ETHUSDT, SOLUSDT
+  watch-list: BTCUSDT
 
   exchange:
     okx:
-      api-key: ${OKX_API_KEY:}
-      secret-key: ${OKX_SECRET_KEY:}
-      passphrase: ${OKX_PASSPHRASE:}
+      api-key: ${OKX_API_KEY:8c2fbccd-35e1-4a09-92b6-7510d0cf5509}
+      secret-key: ${OKX_SECRET_KEY:48BF9F7E6DC2FC48555E1ED15D6F7AAA}
+      passphrase: ${OKX_PASSPHRASE:Yw!158452}
       base-url: https://www.okx.com
 
   glassnode:
-    api-key: ${GLASSNODE_API_KEY:}
+    api-key: ${GLASSNODE_API_KEY:myapi_sk_7b751e55c42ab7f96191d3d306a611e7}
     base-url: https://api.glassnode.com
 
   mcp:
     enabled: false
     provider: deepseek
-    api-key: ${DEEPSEEK_API_KEY:}
+    api-key: ${DEEPSEEK_API_KEY:sk-2d5a8c960a2a42f4b7c259d134f56576}
     base-url: https://api.deepseek.com/v1/chat/completions
     model: deepseek-chat
     timeout-seconds: 60

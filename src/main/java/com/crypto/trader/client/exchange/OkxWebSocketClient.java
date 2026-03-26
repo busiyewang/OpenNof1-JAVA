@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -21,17 +23,18 @@ import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /**
- * OKX WebSocket 公共频道客户端，用于实时订阅 K 线推送。
+ * OKX WebSocket Business 频道客户端，用于实时订阅 K 线推送。
  *
  * <h3>OKX WebSocket 规范</h3>
  * <ul>
- *   <li>公共频道地址: wss://ws.okx.com:8443/ws/v5/public</li>
+ *   <li>Business 频道: wss://ws.okx.com:8443/ws/v5/business（K 线在此频道）</li>
+ *   <li>模拟盘: wss://wspap.okx.com:8443/ws/v5/business</li>
  *   <li>连接限制: 3 次/秒 (基于 IP)</li>
  *   <li>订阅/取消/登录总次数: 480 次/小时</li>
- *   <li>30 秒无消息需发送 "ping" 保持连接</li>
+ *   <li>30 秒无消息自动断开，需 ping 保活</li>
  * </ul>
  *
- * <h3>K 线频道订阅格式</h3>
+ * <h3>K 线订阅格式（OKX 官方文档）</h3>
  * <pre>
  * {"op":"subscribe","args":[{"channel":"candle1m","instId":"BTC-USDT"}]}
  * </pre>
@@ -41,27 +44,28 @@ import java.util.function.Consumer;
  * {"arg":{"channel":"candle1m","instId":"BTC-USDT"},
  *  "data":[["ts","o","h","l","c","vol","volCcy","volCcyQuote","confirm"]]}
  * </pre>
+ *
+ * @see <a href="https://www.okx.com/docs-v5/zh/#overview-websockets">OKX WebSocket 文档</a>
  */
 @Component
 @Slf4j
 public class OkxWebSocketClient {
 
-    private static final String WS_PUBLIC_URL = "wss://ws.okx.com:8443/ws/v5/public";
+    /** 实盘 Business WebSocket */
+    private static final String WS_BUSINESS_URL = "wss://ws.okx.com:8443/ws/v5/business";
+    /** 模拟盘 Business WebSocket */
+    private static final String WS_BUSINESS_URL_DEMO = "wss://wspap.okx.com:8443/ws/v5/business";
+
     private static final int PING_INTERVAL_SECONDS = 25;
     private static final int RECONNECT_DELAY_SECONDS = 5;
-    private static final int MAX_RECONNECT_ATTEMPTS = 10;
+    private static final int MAX_RECONNECT_ATTEMPTS = 20;
+    private static final int CONNECT_TIMEOUT_SECONDS = 15;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    private HttpClient httpClient;
 
-    /** symbol -> interval -> 已订阅 */
     private final ConcurrentHashMap<String, Boolean> subscriptions = new ConcurrentHashMap<>();
-
-    /** K 线数据回调 */
     private volatile Consumer<Kline> klineCallback;
-
     private volatile WebSocket webSocket;
     private volatile boolean running = false;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -75,18 +79,34 @@ public class OkxWebSocketClient {
     @Value("${crypto.watch-list}")
     private List<String> watchList;
 
-    /**
-     * 注册 K 线数据回调。每收到一条 K 线推送就调用一次。
-     */
+    @Value("${crypto.exchange.okx.simulated:false}")
+    private boolean simulated;
+
+    @Value("${crypto.proxy.enabled:false}")
+    private boolean proxyEnabled;
+
+    @Value("${crypto.proxy.host:127.0.0.1}")
+    private String proxyHost;
+
+    @Value("${crypto.proxy.port:7890}")
+    private int proxyPort;
+
     public void onKline(Consumer<Kline> callback) {
         this.klineCallback = callback;
     }
 
-    /**
-     * 启动 WebSocket 连接并订阅 K 线频道。
-     */
     @PostConstruct
     public void start() {
+        // 构建 HttpClient（带代理）
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS));
+
+        if (proxyEnabled) {
+            builder.proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)));
+            log.info("[OkxWS] HTTP 代理已启用: {}:{}", proxyHost, proxyPort);
+        }
+
+        this.httpClient = builder.build();
         running = true;
         connect();
     }
@@ -94,38 +114,32 @@ public class OkxWebSocketClient {
     @PreDestroy
     public void stop() {
         running = false;
-        if (pingTask != null) {
-            pingTask.cancel(true);
-        }
+        if (pingTask != null) pingTask.cancel(true);
         scheduler.shutdownNow();
         if (webSocket != null) {
-            webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
+            try { webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown"); } catch (Exception ignored) {}
         }
-        log.info("[OkxWS] WebSocket client stopped");
+        log.info("[OkxWS] WebSocket 客户端已停止");
     }
 
-    /**
-     * 建立 WebSocket 连接。
-     */
     private void connect() {
         if (!running) return;
 
-        log.info("[OkxWS] Connecting to {}", WS_PUBLIC_URL);
+        String wsUrl = simulated ? WS_BUSINESS_URL_DEMO : WS_BUSINESS_URL;
+        log.info("[OkxWS] 正在连接: {} (simulated={})", wsUrl, simulated);
 
         httpClient.newWebSocketBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .buildAsync(URI.create(WS_PUBLIC_URL), new WebSocket.Listener() {
+                .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                .buildAsync(URI.create(wsUrl), new WebSocket.Listener() {
 
                     private final StringBuilder buffer = new StringBuilder();
 
                     @Override
                     public void onOpen(WebSocket ws) {
-                        log.info("[OkxWS] Connected");
+                        log.info("[OkxWS] 连接成功: {}", wsUrl);
                         webSocket = ws;
                         reconnectAttempts = 0;
-                        // 订阅所有交易对的 1m K 线
                         subscribeAll(ws);
-                        // 启动心跳
                         startPing(ws);
                         ws.request(1);
                     }
@@ -144,27 +158,24 @@ public class OkxWebSocketClient {
 
                     @Override
                     public CompletionStage<?> onClose(WebSocket ws, int statusCode, String reason) {
-                        log.warn("[OkxWS] Connection closed: code={} reason={}", statusCode, reason);
+                        log.warn("[OkxWS] 连接关闭: code={} reason={}", statusCode, reason);
                         scheduleReconnect();
                         return null;
                     }
 
                     @Override
                     public void onError(WebSocket ws, Throwable error) {
-                        log.error("[OkxWS] Error: {}", error.getMessage());
+                        log.error("[OkxWS] 连接错误: {}", error.getMessage(), error);
                         scheduleReconnect();
                     }
                 })
                 .exceptionally(ex -> {
-                    log.error("[OkxWS] Failed to connect: {}", ex.getMessage());
+                    log.error("[OkxWS] 连接失败: {}", ex.getMessage(), ex);
                     scheduleReconnect();
                     return null;
                 });
     }
 
-    /**
-     * 订阅所有 watch-list 交易对的 K 线频道。
-     */
     private void subscribeAll(WebSocket ws) {
         for (String symbol : watchList) {
             subscribe(ws, symbol, "1m");
@@ -172,22 +183,22 @@ public class OkxWebSocketClient {
     }
 
     /**
-     * 订阅单个交易对的 K 线频道。
+     * 订阅 K 线频道。
      *
-     * @param ws       WebSocket 连接
-     * @param symbol   交易对，如 BTCUSDT
-     * @param interval 周期，如 1m
+     * <p>OKX K 线频道格式：channel 为 "candle" + bar（如 candle1m, candle1H）</p>
+     * <pre>
+     * {"op":"subscribe","args":[{"channel":"candle1m","instId":"BTC-USDT"}]}
+     * </pre>
      */
     private void subscribe(WebSocket ws, String symbol, String interval) {
         String instId = toOkxInstId(symbol);
-        String channel = "candle" + toOkxBar(interval);
+        String channel = "candle" + toOkxBar(interval);  // candle1m, candle1H, candle1D...
         String key = symbol + ":" + interval;
 
-        if (subscriptions.containsKey(key)) {
-            return;
-        }
+        if (subscriptions.containsKey(key)) return;
 
         try {
+            // OKX 官方文档格式: channel 直接是 "candle1m" 等
             String msg = objectMapper.writeValueAsString(Map.of(
                     "op", "subscribe",
                     "args", List.of(Map.of(
@@ -195,35 +206,34 @@ public class OkxWebSocketClient {
                             "instId", instId
                     ))
             ));
+
+            log.info("[OkxWS] 发送订阅: {}", msg);
             ws.sendText(msg, true);
             subscriptions.put(key, true);
-            log.info("[OkxWS] Subscribed: channel={} instId={}", channel, instId);
         } catch (Exception e) {
-            log.error("[OkxWS] Failed to subscribe {} {}", symbol, interval, e);
+            log.error("[OkxWS] 订阅失败: {} {} error={}", symbol, interval, e.getMessage(), e);
         }
     }
 
-    /**
-     * 处理 WebSocket 接收到的消息。
-     */
     private void handleMessage(String message) {
-        // 心跳响应
         if ("pong".equals(message)) {
-            log.debug("[OkxWS] Pong received");
+            log.debug("[OkxWS] Pong 收到");
             return;
         }
 
         try {
             JsonNode root = objectMapper.readTree(message);
 
-            // 订阅确认
+            // 事件响应（订阅确认 / 错误）
             if (root.has("event")) {
                 String event = root.get("event").asText();
                 if ("subscribe".equals(event)) {
-                    log.debug("[OkxWS] Subscribe confirmed: {}", root.path("arg"));
+                    log.info("[OkxWS] 订阅确认: {}", root.path("arg"));
                 } else if ("error".equals(event)) {
-                    log.error("[OkxWS] Subscribe error: code={} msg={}",
-                            root.path("code").asText(), root.path("msg").asText());
+                    log.error("[OkxWS] 订阅错误: code={} msg={} connId={}",
+                            root.path("code").asText(),
+                            root.path("msg").asText(),
+                            root.path("connId").asText());
                 }
                 return;
             }
@@ -234,7 +244,6 @@ public class OkxWebSocketClient {
                 String channel = arg.path("channel").asText();
                 String instId = arg.path("instId").asText();
 
-                // 从 channel 名提取 interval（如 candle1m -> 1m, candle1H -> 1h）
                 String interval = parseIntervalFromChannel(channel);
                 String symbol = fromOkxInstId(instId);
 
@@ -249,7 +258,6 @@ public class OkxWebSocketClient {
                     BigDecimal c   = new BigDecimal(item.get(4).asText());
                     BigDecimal vol = new BigDecimal(item.get(5).asText());
 
-                    // confirm 字段: "0" 未完成, "1" 已完成
                     boolean confirmed = item.size() > 8 && "1".equals(item.get(8).asText());
 
                     Kline kline = new Kline();
@@ -266,54 +274,51 @@ public class OkxWebSocketClient {
                         try {
                             klineCallback.accept(kline);
                         } catch (Exception e) {
-                            log.error("[OkxWS] Kline callback error for {}", symbol, e);
+                            log.error("[OkxWS] K线回调异常: {} error={}", symbol, e.getMessage(), e);
                         }
                     }
 
                     if (confirmed) {
-                        log.debug("[OkxWS] Confirmed kline: {} {} ts={}", symbol, interval, ts);
+                        log.info("[OkxWS] K线已确认: {} {} ts={} close={}", symbol, interval, ts, c);
                     }
                 }
             }
         } catch (Exception e) {
-            log.error("[OkxWS] Failed to parse message: {}", message.substring(0, Math.min(200, message.length())), e);
+            log.error("[OkxWS] 消息解析失败: {}", message.substring(0, Math.min(200, message.length())), e);
         }
     }
 
-    /**
-     * 启动心跳定时器，每 25 秒发一次 "ping"（OKX 要求 30 秒内保活）。
-     */
     private void startPing(WebSocket ws) {
-        if (pingTask != null) {
-            pingTask.cancel(false);
-        }
+        if (pingTask != null) pingTask.cancel(false);
         pingTask = scheduler.scheduleAtFixedRate(() -> {
             try {
                 if (ws != null && !ws.isInputClosed() && !ws.isOutputClosed()) {
                     ws.sendText("ping", true);
-                    log.debug("[OkxWS] Ping sent");
+                    log.debug("[OkxWS] Ping 已发送");
                 }
             } catch (Exception e) {
-                log.warn("[OkxWS] Ping failed: {}", e.getMessage());
+                log.warn("[OkxWS] Ping 发送失败: {}", e.getMessage());
             }
         }, PING_INTERVAL_SECONDS, PING_INTERVAL_SECONDS, TimeUnit.SECONDS);
     }
 
-    /**
-     * 断线重连。指数退避，最多重试 MAX_RECONNECT_ATTEMPTS 次。
-     */
     private void scheduleReconnect() {
         if (!running) return;
         subscriptions.clear();
 
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            log.error("[OkxWS] Max reconnect attempts ({}) reached, giving up", MAX_RECONNECT_ATTEMPTS);
+            log.error("[OkxWS] 已达最大重连次数 ({})，停止重连", MAX_RECONNECT_ATTEMPTS);
+            // 重置计数器，10 分钟后再尝试
+            scheduler.schedule(() -> {
+                reconnectAttempts = 0;
+                connect();
+            }, 10, TimeUnit.MINUTES);
             return;
         }
 
         reconnectAttempts++;
-        long delay = (long) RECONNECT_DELAY_SECONDS * reconnectAttempts;
-        log.info("[OkxWS] Reconnecting in {} seconds (attempt {}/{})", delay, reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
+        long delay = Math.min((long) RECONNECT_DELAY_SECONDS * reconnectAttempts, 60);
+        log.info("[OkxWS] {} 秒后重连 (第 {}/{} 次)", delay, reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
 
         scheduler.schedule(this::connect, delay, TimeUnit.SECONDS);
     }
@@ -325,7 +330,7 @@ public class OkxWebSocketClient {
     /** candle1m -> 1m, candle1H -> 1h, candle1D -> 1d */
     private String parseIntervalFromChannel(String channel) {
         if (channel == null || !channel.startsWith("candle")) return "1m";
-        String raw = channel.substring(6); // 去掉 "candle"
+        String raw = channel.substring(6);
         return raw.toLowerCase();
     }
 
