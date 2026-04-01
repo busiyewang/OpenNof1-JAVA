@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+</head>
+<body style="margin:0;padding:0;font-family:'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f5;padding:20px 0;">
+    <tr>
+        <td align="center">
+            <table width="640" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+
+                <!-- Header -->
+                <tr>
+                    <td style="background:linear-gradient(135deg,#1a1a2e,#16213e);padding:24px 30px;color:#ffffff;">
+                        <h1 style="margin:0;font-size:22px;font-weight:600;" th:text="${reportTitle}">市场分析报告</h1>
+                        <p style="margin:8px 0 0;font-size:13px;color:#a0aec0;" th:text="${reportDate}">2026-04-01</p>
+                    </td>
+                </tr>
+
+                <!-- Trend Summary -->
+                <tr>
+                    <td style="padding:24px 30px;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td style="width:50%;">
+                                    <p style="margin:0;font-size:12px;color:#718096;text-transform:uppercase;">趋势方向</p>
+                                    <p style="margin:4px 0 0;font-size:24px;font-weight:700;" th:style="'color:' + ${trendColor}" th:text="${trendDirectionCn}">看多</p>
+                                </td>
+                                <td style="width:25%;text-align:center;">
+                                    <p style="margin:0;font-size:12px;color:#718096;">置信度</p>
+                                    <p style="margin:4px 0 0;font-size:24px;font-weight:700;color:#2d3748;" th:text="${confidence}">0.85</p>
+                                </td>
+                                <td style="width:25%;text-align:right;">
+                                    <p style="margin:0;font-size:12px;color:#718096;">风险等级</p>
+                                    <span th:style="'display:inline-block;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600;color:#fff;background-color:' + ${riskColor}" th:text="${riskLevelCn}">中等</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Divider -->
+                <tr><td style="padding:0 30px;"><hr style="border:none;border-top:1px solid #e2e8f0;margin:0;"/></td></tr>
+
+                <!-- Price Overview -->
+                <tr>
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">价格概览</h2>
+                        <table width="100%" cellpadding="8" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:6px;border-collapse:collapse;">
+                            <tr style="background-color:#f7fafc;">
+                                <td style="border:1px solid #e2e8f0;font-size:13px;color:#718096;font-weight:600;">当前价格</td>
+                                <td style="border:1px solid #e2e8f0;font-size:13px;color:#718096;font-weight:600;">支撑位</td>
+                                <td style="border:1px solid #e2e8f0;font-size:13px;color:#718096;font-weight:600;">阻力位</td>
+                            </tr>
+                            <tr>
+                                <td style="border:1px solid #e2e8f0;font-size:15px;font-weight:700;color:#2d3748;" th:text="${priceCurrent}">$83,000</td>
+                                <td style="border:1px solid #e2e8f0;font-size:15px;color:#27ae60;" th:text="${priceSupport}">$80,000</td>
+                                <td style="border:1px solid #e2e8f0;font-size:15px;color:#e74c3c;" th:text="${priceResistance}">$88,000</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Multi-Timeframe Analysis -->
+                <tr th:if="${not #lists.isEmpty(timeframes)}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">多时间框架分析</h2>
+                        <table width="100%" cellpadding="6" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:6px;border-collapse:collapse;font-size:12px;">
+                            <tr style="background-color:#f7fafc;">
+                                <td style="border:1px solid #e2e8f0;font-weight:600;color:#718096;">周期</td>
+                                <td style="border:1px solid #e2e8f0;font-weight:600;color:#718096;">价格</td>
+                                <td style="border:1px solid #e2e8f0;font-weight:600;color:#718096;">涨跌</td>
+                                <td style="border:1px solid #e2e8f0;font-weight:600;color:#718096;">MACD</td>
+                                <td style="border:1px solid #e2e8f0;font-weight:600;color:#718096;">布林带位置</td>
+                            </tr>
+                            <tr th:each="tf : ${timeframes}">
+                                <td style="border:1px solid #e2e8f0;font-weight:600;" th:text="${tf.timeframe}">1h</td>
+                                <td style="border:1px solid #e2e8f0;" th:text="${tf.currentPrice}">83000</td>
+                                <td style="border:1px solid #e2e8f0;" th:style="'color:' + (${tf.priceChangePercent} >= 0 ? '#27ae60' : '#e74c3c')" th:text="${tf.priceChangeFormatted}">+2.5%</td>
+                                <td style="border:1px solid #e2e8f0;" th:style="'color:' + (${tf.macdHistogram} >= 0 ? '#27ae60' : '#e74c3c')" th:text="${tf.macdStatus}">多头</td>
+                                <td style="border:1px solid #e2e8f0;" th:text="${tf.bollingerPosition}">中轨上方</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- On-Chain Insights -->
+                <tr th:if="${not #maps.isEmpty(onChainInsights)}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">链上数据解读</h2>
+                        <table width="100%" cellpadding="8" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:6px;border-collapse:collapse;font-size:13px;">
+                            <tr th:each="entry : ${onChainInsights}">
+                                <td style="border:1px solid #e2e8f0;width:30%;font-weight:600;color:#4a5568;background-color:#f7fafc;" th:text="${entry.key}">NUPL</td>
+                                <td style="border:1px solid #e2e8f0;color:#2d3748;" th:text="${entry.value}">当前处于乐观区间</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Key Indicators -->
+                <tr th:if="${not #maps.isEmpty(keyIndicators)}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">技术指标解读</h2>
+                        <table width="100%" cellpadding="8" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:6px;border-collapse:collapse;font-size:13px;">
+                            <tr th:each="entry : ${keyIndicators}">
+                                <td style="border:1px solid #e2e8f0;width:30%;font-weight:600;color:#4a5568;background-color:#f7fafc;" th:text="${entry.key}">MACD</td>
+                                <td style="border:1px solid #e2e8f0;color:#2d3748;" th:text="${entry.value}">金叉形成</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Outlook -->
+                <tr>
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">市场展望</h2>
+                        <table width="100%" cellpadding="12" cellspacing="0" style="border-radius:6px;">
+                            <tr>
+                                <td style="background-color:#ebf8ff;border-radius:6px;margin-bottom:8px;">
+                                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#3182ce;">短期展望 (1-3天)</p>
+                                    <p style="margin:0;font-size:13px;color:#2d3748;" th:text="${shortTermOutlook}">短期看多</p>
+                                </td>
+                            </tr>
+                            <tr><td style="height:8px;"></td></tr>
+                            <tr>
+                                <td style="background-color:#faf5ff;border-radius:6px;">
+                                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#805ad5;">中期展望 (1-2周)</p>
+                                    <p style="margin:0;font-size:13px;color:#2d3748;" th:text="${mediumTermOutlook}">中期震荡</p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Risk Factors -->
+                <tr th:if="${not #lists.isEmpty(riskFactors)}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">风险因子</h2>
+                        <ul style="margin:0;padding-left:20px;">
+                            <li th:each="factor : ${riskFactors}" style="font-size:13px;color:#e53e3e;margin-bottom:6px;" th:text="${factor}">风险描述</li>
+                        </ul>
+                    </td>
+                </tr>
+
+                <!-- AI Analysis -->
+                <tr th:if="${deepseekAnalysis != null and deepseekAnalysis != ''}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">AI 详细分析</h2>
+                        <div style="background-color:#f7fafc;border-left:3px solid #3182ce;padding:16px;border-radius:0 6px 6px 0;font-size:13px;line-height:1.6;color:#4a5568;" th:text="${deepseekAnalysis}">
+                            详细分析内容
+                        </div>
+                    </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                    <td style="padding:20px 30px;background-color:#f7fafc;border-top:1px solid #e2e8f0;">
+                        <p style="margin:0;font-size:11px;color:#a0aec0;text-align:center;">
+                            本报告由 OpenNof1 加密货币分析系统自动生成，仅供参考，不构成投资建议。
+                        </p>
+                        <p style="margin:4px 0 0;font-size:11px;color:#a0aec0;text-align:center;">
+                            Powered by DeepSeek AI + Glassnode + OKX
+                        </p>
+                    </td>
+                </tr>
+
+            </table>
+        </td>
+    </tr>
+</table>
+
+</body>
+</html>

@@ -81,7 +81,8 @@ public class KlineCollector {
      */
     public void collect(String symbol, String interval) {
         Instant end = Instant.now();
-        Instant start = end.minusSeconds(5 * 60);
+        long backfillSeconds = getBackfillSeconds(interval);
+        Instant start = end.minusSeconds(backfillSeconds);
         List<Kline> klines = exchangeClient.getKlines(symbol, interval, start.toEpochMilli(), end.toEpochMilli());
         if (klines.isEmpty()) {
             return;
@@ -94,8 +95,21 @@ public class KlineCollector {
 
         if (!newKlines.isEmpty()) {
             klineRepository.saveAll(newKlines);
-            log.info("[KlineCollector] REST backfill: saved {} new klines for {} (fetched {}, skipped {} duplicates)",
-                    newKlines.size(), symbol, klines.size(), klines.size() - newKlines.size());
+            log.info("[KlineCollector] REST backfill: saved {} new klines for {} {} (fetched {}, skipped {} duplicates)",
+                    newKlines.size(), symbol, interval, klines.size(), klines.size() - newKlines.size());
         }
+    }
+
+    /** 根据 K 线周期返回回补时间窗口（秒） */
+    private long getBackfillSeconds(String interval) {
+        return switch (interval) {
+            case "1m"  -> 5 * 60;          // 5 分钟
+            case "5m"  -> 30 * 60;         // 30 分钟
+            case "15m" -> 2 * 3600;        // 2 小时
+            case "1h"  -> 12 * 3600;       // 12 小时
+            case "4h"  -> 2 * 24 * 3600;   // 2 天
+            case "1d"  -> 7 * 24 * 3600;   // 7 天
+            default    -> 5 * 60;
+        };
     }
 }

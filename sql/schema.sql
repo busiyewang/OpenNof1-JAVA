@@ -99,3 +99,30 @@ CREATE TABLE IF NOT EXISTS `indicator_values` (
     INDEX `idx_indicator_symbol_ts` (`symbol`, `timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='技术指标计算结果';
+
+-- ------------------------------------------------------------
+-- 6. 分析报告表
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `analysis_reports` (
+    `id`                  BIGINT          NOT NULL AUTO_INCREMENT,
+    `symbol`              VARCHAR(20)     NOT NULL COMMENT '交易对',
+    `report_type`         VARCHAR(20)     NOT NULL COMMENT '报告类型: DAILY, WEEKLY, ON_DEMAND',
+    `created_at`          DATETIME(3)     NOT NULL COMMENT '报告生成时间 (UTC)',
+    `trend_direction`     VARCHAR(30)     NOT NULL COMMENT '趋势方向: STRONGLY_BULLISH, BULLISH, NEUTRAL, BEARISH, STRONGLY_BEARISH',
+    `trend_confidence`    DOUBLE          DEFAULT NULL COMMENT '趋势置信度 (0~1)',
+    `risk_assessment`     VARCHAR(20)     DEFAULT NULL COMMENT '风险等级: LOW, MODERATE, HIGH, EXTREME',
+    `price_current`       DECIMAL(20, 8)  DEFAULT NULL COMMENT '当前价格',
+    `price_support`       DECIMAL(20, 8)  DEFAULT NULL COMMENT '支撑位',
+    `price_resistance`    DECIMAL(20, 8)  DEFAULT NULL COMMENT '阻力位',
+    `short_term_outlook`  TEXT            DEFAULT NULL COMMENT '短期展望 (1-3天)',
+    `medium_term_outlook` TEXT            DEFAULT NULL COMMENT '中期展望 (1-2周)',
+    `timeframes_summary`  MEDIUMTEXT      DEFAULT NULL COMMENT '多时间框架分析摘要 (JSON)',
+    `key_indicators`      MEDIUMTEXT      DEFAULT NULL COMMENT '关键技术指标解读 (JSON)',
+    `onchain_summary`     MEDIUMTEXT      DEFAULT NULL COMMENT '链上数据分析摘要 (JSON)',
+    `risk_factors`        TEXT            DEFAULT NULL COMMENT '风险因子列表 (JSON array)',
+    `deepseek_analysis`   MEDIUMTEXT      DEFAULT NULL COMMENT 'DeepSeek 完整分析文本',
+    PRIMARY KEY (`id`),
+    INDEX `idx_report_symbol_created` (`symbol`, `created_at`),
+    INDEX `idx_report_type_created` (`report_type`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='加密货币分析报告';

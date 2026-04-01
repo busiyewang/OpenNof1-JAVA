@@ -176,9 +176,15 @@ public class OkxWebSocketClient {
                 });
     }
 
+    @Value("${crypto.analysis.timeframes:1h,4h,1d}")
+    private List<String> analysisTimeframes;
+
     private void subscribeAll(WebSocket ws) {
         for (String symbol : watchList) {
             subscribe(ws, symbol, "1m");
+            for (String tf : analysisTimeframes) {
+                subscribe(ws, symbol, tf);
+            }
         }
     }
 
