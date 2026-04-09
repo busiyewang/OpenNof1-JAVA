@@ -42,12 +42,23 @@ public class OkxClient implements ExchangeClient {
         log.info("[OKX REST] 初始化完成: baseUrl={}, simulated={}", baseUrl, simulated);
     }
 
+    /**
+     * 获取指定时间范围内的 K 线数据。
+     *
+     * <p>OKX API 参数含义（注意与直觉相反）：</p>
+     * <ul>
+     *   <li>{@code after}: 返回时间戳<b>早于</b>此值的数据（向过去翻页）</li>
+     *   <li>{@code before}: 返回时间戳<b>晚于</b>此值的数据（向未来翻页）</li>
+     * </ul>
+     * <p>所以查询 [startTime, endTime] 范围：after=endTime, before=startTime</p>
+     */
     @Override
     public List<Kline> getKlines(String symbol, String interval, long startTime, long endTime) {
         String instId = toOkxInstId(symbol);
         String bar = toOkxBar(interval);
 
-        log.info("[OKX REST] 获取K线: instId={}, bar={}, after={}, before={}", instId, bar, startTime, endTime);
+        log.info("[OKX REST] 获取K线: instId={}, bar={}, range=[{} ~ {}]",
+                instId, bar, Instant.ofEpochMilli(startTime), Instant.ofEpochMilli(endTime));
 
         try {
             @SuppressWarnings("unchecked")
@@ -56,8 +67,8 @@ public class OkxClient implements ExchangeClient {
                             .path("/api/v5/market/candles")
                             .queryParam("instId", instId)
                             .queryParam("bar", bar)
-                            .queryParam("after", String.valueOf(startTime))
-                            .queryParam("before", String.valueOf(endTime))
+                            .queryParam("after", String.valueOf(endTime))
+                            .queryParam("before", String.valueOf(startTime))
                             .build())
                     .header("Content-Type", "application/json")
                     .retrieve()
