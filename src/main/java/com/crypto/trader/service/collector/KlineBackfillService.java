@@ -10,7 +10,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -31,21 +31,19 @@ public class KlineBackfillService {
     @Autowired
     private KlineRepository klineRepository;
 
-    /** 每次 API 请求间隔（毫秒），OKX 限制 3次/秒 */
+    /** 每次 API 请求间隔（毫秒），OKX 限制 3次/秒/IP */
     private static final long API_SLEEP_MS = 350;
+
+    /** 1m 级别单次拉取上限（避免 OOM），超过此值分段拉取 */
+    private static final int MAX_MEMORY_KLINES = 20000;
 
     /** 正在执行的回填任务状态 */
     private final ConcurrentHashMap<String, BackfillProgress> progressMap = new ConcurrentHashMap<>();
 
     /**
      * 异步执行历史数据回填。
-     *
-     * @param symbol    交易对
-     * @param interval  K线周期
-     * @param startTime 起始时间
-     * @param endTime   结束时间
      */
-    @Async("strategyExecutorPool")
+    @Async("backfillExecutorPool")
     public void backfillAsync(String symbol, String interval, Instant startTime, Instant endTime) {
         String taskKey = symbol + ":" + interval;
 
@@ -66,54 +64,26 @@ public class KlineBackfillService {
         try {
             log.info("[回填] ========== {} 开始回填 {} ~ {} ==========", taskKey, startTime, endTime);
 
-            // 1. 拉取所有历史K线
-            List<Kline> allKlines = okxClient.getKlinesHistory(
-                    symbol, interval, startTime.toEpochMilli(), endTime.toEpochMilli(), API_SLEEP_MS);
+            // 根据 interval 和时间跨度决定是否分段拉取
+            long spanMs = endTime.toEpochMilli() - startTime.toEpochMilli();
+            long intervalMs = intervalToMs(interval);
+            long estimatedCount = intervalMs > 0 ? spanMs / intervalMs : 0;
 
-            progress.setTotalFetched(allKlines.size());
-
-            if (allKlines.isEmpty()) {
-                progress.setStatus(BackfillStatus.COMPLETED);
-                progress.setMessage("API 未返回数据");
-                progress.setFinishedAt(Instant.now());
-                log.warn("[回填] {} 未获取到任何K线数据", taskKey);
-                return;
-            }
-
-            // 2. 去重入库（分批处理，每批500条）
-            int batchSize = 500;
-            AtomicInteger savedCount = new AtomicInteger(0);
-            AtomicInteger skippedCount = new AtomicInteger(0);
-
-            for (int i = 0; i < allKlines.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, allKlines.size());
-                List<Kline> batch = allKlines.subList(i, end);
-
-                List<Kline> newKlines = batch.stream()
-                        .filter(k -> !klineRepository.existsBySymbolAndIntervalAndTimestamp(
-                                k.getSymbol(), k.getInterval(), k.getTimestamp()))
-                        .collect(Collectors.toList());
-
-                if (!newKlines.isEmpty()) {
-                    klineRepository.saveAll(newKlines);
-                    savedCount.addAndGet(newKlines.size());
-                }
-                skippedCount.addAndGet(batch.size() - newKlines.size());
-
-                progress.setSavedCount(savedCount.get());
-                progress.setSkippedCount(skippedCount.get());
-
-                log.info("[回填] {} 进度: {}/{} 已拉取, 新增={}, 跳过={}",
-                        taskKey, end, allKlines.size(), savedCount.get(), skippedCount.get());
+            if (estimatedCount > MAX_MEMORY_KLINES) {
+                // 分段拉取，每段 MAX_MEMORY_KLINES 条
+                backfillInSegments(symbol, interval, startTime, endTime, progress);
+            } else {
+                // 一次性拉取
+                backfillOnce(symbol, interval, startTime, endTime, progress);
             }
 
             progress.setStatus(BackfillStatus.COMPLETED);
             progress.setFinishedAt(Instant.now());
-            progress.setMessage(String.format("完成：拉取%d条，新增%d条，跳过%d条重复",
-                    allKlines.size(), savedCount.get(), skippedCount.get()));
+            progress.setMessage(String.format("完成：新增%d条，跳过%d条重复",
+                    progress.getSavedCount(), progress.getSkippedCount()));
 
-            log.info("[回填] ========== {} 回填完成：拉取{}条，新增{}条，跳过{}条 ==========",
-                    taskKey, allKlines.size(), savedCount.get(), skippedCount.get());
+            log.info("[回填] ========== {} 回填完成：新增{}条，跳过{}条 ==========",
+                    taskKey, progress.getSavedCount(), progress.getSkippedCount());
 
         } catch (Exception e) {
             progress.setStatus(BackfillStatus.FAILED);
@@ -124,22 +94,114 @@ public class KlineBackfillService {
     }
 
     /**
-     * 查询回填进度。
+     * 一次性拉取并入库（数据量 < MAX_MEMORY_KLINES 时使用）。
      */
+    private void backfillOnce(String symbol, String interval, Instant startTime, Instant endTime,
+                               BackfillProgress progress) {
+        List<Kline> allKlines = okxClient.getKlinesHistory(
+                symbol, interval, startTime.toEpochMilli(), endTime.toEpochMilli(), API_SLEEP_MS);
+
+        progress.setTotalFetched(allKlines.size());
+
+        if (!allKlines.isEmpty()) {
+            batchSaveWithDedup(allKlines, progress);
+        }
+    }
+
+    /**
+     * 分段拉取（1m 级别数月数据，避免 OOM）。
+     * 将时间范围分成多段，每段拉取后立即入库释放内存。
+     */
+    private void backfillInSegments(String symbol, String interval, Instant startTime, Instant endTime,
+                                     BackfillProgress progress) {
+        long intervalMs = intervalToMs(interval);
+        long segmentMs = intervalMs * MAX_MEMORY_KLINES;
+        long cursor = endTime.toEpochMilli();
+
+        while (cursor > startTime.toEpochMilli()) {
+            long segStart = Math.max(cursor - segmentMs, startTime.toEpochMilli());
+
+            log.info("[回填] {}:{} 分段拉取: {} ~ {}", symbol, interval,
+                    Instant.ofEpochMilli(segStart), Instant.ofEpochMilli(cursor));
+
+            List<Kline> segment = okxClient.getKlinesHistory(
+                    symbol, interval, segStart, cursor, API_SLEEP_MS);
+
+            progress.setTotalFetched(progress.getTotalFetched() + segment.size());
+
+            if (!segment.isEmpty()) {
+                batchSaveWithDedup(segment, progress);
+            }
+
+            cursor = segStart;
+
+            // 段间也要限流
+            if (cursor > startTime.toEpochMilli()) {
+                try { Thread.sleep(500); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }
+        }
+    }
+
+    /**
+     * 批量去重入库（用批量查询替代 N+1）。
+     */
+    private void batchSaveWithDedup(List<Kline> klines, BackfillProgress progress) {
+        int batchSize = 500;
+
+        for (int i = 0; i < klines.size(); i += batchSize) {
+            int end = Math.min(i + batchSize, klines.size());
+            List<Kline> batch = klines.subList(i, end);
+
+            // 批量查询已存在的时间戳，替代逐条 exists 查询
+            String symbol = batch.get(0).getSymbol();
+            String interval = batch.get(0).getInterval();
+            List<Instant> timestamps = batch.stream()
+                    .map(Kline::getTimestamp)
+                    .collect(Collectors.toList());
+
+            Set<Instant> existingTimestamps = new HashSet<>(
+                    klineRepository.findExistingTimestamps(symbol, interval, timestamps));
+
+            List<Kline> newKlines = batch.stream()
+                    .filter(k -> !existingTimestamps.contains(k.getTimestamp()))
+                    .collect(Collectors.toList());
+
+            if (!newKlines.isEmpty()) {
+                klineRepository.saveAll(newKlines);
+                progress.setSavedCount(progress.getSavedCount() + newKlines.size());
+            }
+            progress.setSkippedCount(progress.getSkippedCount() + (batch.size() - newKlines.size()));
+
+            log.debug("[回填] 批次 {}-{}: 新增={}, 跳过={}",
+                    i, end, newKlines.size(), batch.size() - newKlines.size());
+        }
+    }
+
+    /**
+     * interval 转毫秒数（用于估算数据量）。
+     */
+    private long intervalToMs(String interval) {
+        return switch (interval) {
+            case "1m"  -> 60_000L;
+            case "3m"  -> 180_000L;
+            case "5m"  -> 300_000L;
+            case "15m" -> 900_000L;
+            case "30m" -> 1_800_000L;
+            case "1h"  -> 3_600_000L;
+            case "2h"  -> 7_200_000L;
+            case "4h"  -> 14_400_000L;
+            case "1d"  -> 86_400_000L;
+            default    -> 60_000L;
+        };
+    }
+
     public BackfillProgress getProgress(String symbol, String interval) {
         return progressMap.get(symbol + ":" + interval);
     }
 
-    /**
-     * 查询所有回填任务状态。
-     */
     public ConcurrentHashMap<String, BackfillProgress> getAllProgress() {
         return progressMap;
     }
-
-    // =========================================================================
-    // 进度模型
-    // =========================================================================
 
     public enum BackfillStatus {
         RUNNING, COMPLETED, FAILED

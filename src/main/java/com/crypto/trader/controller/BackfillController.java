@@ -64,13 +64,19 @@ public class BackfillController {
 
         if (startDate != null) {
             start = LocalDate.parse(startDate).atStartOfDay().toInstant(ZoneOffset.UTC);
+            // endDate 取当天结束（次日 00:00），确保包含 endDate 当天的数据
             end = endDate != null
-                    ? LocalDate.parse(endDate).atStartOfDay().toInstant(ZoneOffset.UTC)
+                    ? LocalDate.parse(endDate).plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)
                     : Instant.now();
         } else {
             int m = months != null ? months : 3;
             end = Instant.now();
             start = end.minus(m * 30L, ChronoUnit.DAYS);
+        }
+
+        // 参数校验
+        if (start.isAfter(end)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "startDate 不能晚于 endDate"));
         }
 
         // 检查是否已有任务在执行
@@ -113,13 +119,14 @@ public class BackfillController {
         if (startDate != null) {
             start = LocalDate.parse(startDate).atStartOfDay().toInstant(ZoneOffset.UTC);
             end = endDate != null
-                    ? LocalDate.parse(endDate).atStartOfDay().toInstant(ZoneOffset.UTC)
+                    ? LocalDate.parse(endDate).plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)
                     : Instant.now();
         } else {
             end = Instant.now();
             start = end.minus(months * 30L, ChronoUnit.DAYS);
         }
 
+        // 回填任务通过 backfillExecutorPool（maxPoolSize=1）串行执行，不会并行打 API
         String[] intervals = {"1h", "4h", "1d"};
         Map<String, String> tasks = new LinkedHashMap<>();
 
