@@ -8,12 +8,12 @@ import java.time.Instant;
  * 缠论买卖点。
  *
  * <ul>
- *   <li>第一类买点：下跌趋势背驰，趋势即将反转</li>
- *   <li>第一类卖点：上涨趋势背驰，趋势即将反转</li>
- *   <li>第二类买点：一买后的回调不创新低</li>
- *   <li>第二类卖点：一卖后的反弹不创新高</li>
- *   <li>第三类买点：离开中枢后的回调不回到中枢内</li>
- *   <li>第三类卖点：跌离中枢后的反弹不回到中枢内</li>
+ *   <li>第一类买点：下跌趋势背驰，趋势即将反转（置信度最高）</li>
+ *   <li>第一类卖点：上涨趋势背驰，趋势即将反转（置信度最高）</li>
+ *   <li>第二类买点：一买后的回调不创新低（确认信号）</li>
+ *   <li>第二类卖点：一卖后的反弹不创新高（确认信号）</li>
+ *   <li>第三类买点：离开中枢后的回调不回到中枢内（右侧信号）</li>
+ *   <li>第三类卖点：跌离中枢后的反弹不回到中枢内（右侧信号）</li>
  * </ul>
  */
 @Data
@@ -39,4 +39,10 @@ public class ChanSignalPoint {
     private Instant timestamp;
     private double confidence;
     private String description;
+
+    /** 背驰类型（仅一买/一卖有值） */
+    private ChanResult.DivergenceType divergenceType;
+
+    /** 关联分型的强弱 */
+    private ChanFractal.Strength fractalStrength;
 }
