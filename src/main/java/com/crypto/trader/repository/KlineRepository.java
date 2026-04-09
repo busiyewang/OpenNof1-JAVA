@@ -37,4 +37,7 @@ public interface KlineRepository extends JpaRepository<Kline, Long> {
      * 判断指定 K 线是否已存在。
      */
     boolean existsBySymbolAndIntervalAndTimestamp(String symbol, String interval, Instant timestamp);
+
+    /** 按 symbol 和时间范围查询 K 线（用于预测回溯评分） */
+    List<Kline> findBySymbolAndTimestampBetween(String symbol, Instant from, Instant to);
 }
