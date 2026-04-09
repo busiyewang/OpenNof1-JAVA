@@ -81,6 +81,14 @@ public class AnalysisService {
             "active_addresses"
     );
 
+    /** 市场数据指标名 */
+    private static final List<String> MARKET_METRIC_NAMES = List.of(
+            "funding_rate", "funding_rate_next",
+            "open_interest", "open_interest_usdt",
+            "fear_greed_index",
+            "liquidation_long_usd", "liquidation_short_usd", "liquidation_long_short_ratio"
+    );
+
     /**
      * 对指定交易对执行完整分析流程。
      *
@@ -127,6 +135,13 @@ public class AnalysisService {
             onChainMetrics.put(metricName, metrics);
         }
 
+        // 2.5 加载市场数据指标（资金费率、持仓量、恐惧贪婪、爆仓）
+        Map<String, List<OnChainMetric>> marketMetrics = new LinkedHashMap<>();
+        for (String metricName : MARKET_METRIC_NAMES) {
+            List<OnChainMetric> metrics = onChainRepository.findTop100BySymbol(symbol, metricName);
+            marketMetrics.put(metricName, metrics);
+        }
+
         // 3. 运行策略引擎，获取各策略结论
         List<Kline> latestKlines = klineRepository.findLatestKlines(symbol, "1h", 100);
         latestKlines.sort(Comparator.comparing(Kline::getTimestamp));
@@ -149,9 +164,9 @@ public class AnalysisService {
         // 4. 运行缠论分析，获取详细结构
         ChanResult chanResult = chanCalculator.calculate(latestKlines);
 
-        // 5. 构建 Prompt（含策略结论和缠论分析）
-        String prompt = promptBuilder.build(symbol, tfAnalyses, onChainMetrics, currentPrice,
-                strategySignals, chanResult);
+        // 5. 构建 Prompt（含策略结论、缠论分析和市场数据）
+        String prompt = promptBuilder.build(symbol, tfAnalyses, onChainMetrics, marketMetrics,
+                currentPrice, strategySignals, chanResult);
         log.info("[分析] {} Prompt 构建完成，长度: {} 字符", symbol, prompt.length());
 
         // 6. 调用 DeepSeek

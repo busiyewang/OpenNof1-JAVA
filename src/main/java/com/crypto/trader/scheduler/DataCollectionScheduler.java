@@ -1,6 +1,7 @@
 package com.crypto.trader.scheduler;
 
 import com.crypto.trader.service.collector.KlineCollector;
+import com.crypto.trader.service.collector.MarketDataCollector;
 import com.crypto.trader.service.collector.OnChainCollector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,9 @@ public class DataCollectionScheduler {
 
     @Autowired
     private OnChainCollector onChainCollector;
+
+    @Autowired
+    private MarketDataCollector marketDataCollector;
 
     @Value("${crypto.watch-list}")
     private List<String> watchList;
@@ -59,6 +63,19 @@ public class DataCollectionScheduler {
                 onChainCollector.collectAllMetrics(symbol);
             } catch (Exception e) {
                 log.error("[数据采集] 链上指标采集失败: {} 错误: {}", symbol, e.getMessage(), e);
+            }
+        }
+    }
+
+    /** 每 30 分钟采集市场数据（资金费率、持仓量、恐惧贪婪、爆仓） */
+    @Scheduled(fixedDelay = 1800000)
+    public void collectMarketData() {
+        log.info("[数据采集] 市场数据采集开始，交易对: {}", watchList);
+        for (String symbol : watchList) {
+            try {
+                marketDataCollector.collectAll(symbol);
+            } catch (Exception e) {
+                log.error("[数据采集] 市场数据采集失败: {} 错误: {}", symbol, e.getMessage(), e);
             }
         }
     }

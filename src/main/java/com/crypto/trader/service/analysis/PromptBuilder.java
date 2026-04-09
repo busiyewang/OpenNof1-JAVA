@@ -28,7 +28,9 @@ public class PromptBuilder {
      * 构建完整的分析 prompt（含策略结论和缠论分析）。
      */
     public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
-                        Map<String, List<OnChainMetric>> onChainMetrics, BigDecimal currentPrice,
+                        Map<String, List<OnChainMetric>> onChainMetrics,
+                        Map<String, List<OnChainMetric>> marketMetrics,
+                        BigDecimal currentPrice,
                         List<Signal> strategySignals, ChanResult chanResult) {
         StringBuilder sb = new StringBuilder();
 
@@ -74,7 +76,10 @@ public class PromptBuilder {
         // ========== 4. 缠论详细分析 ==========
         appendChanAnalysis(sb, chanResult);
 
-        // ========== 5. 链上数据 ==========
+        // ========== 5. 市场情绪数据 ==========
+        appendMarketData(sb, marketMetrics);
+
+        // ========== 6. 链上数据 ==========
         sb.append("\n== 链上数据指标 ==\n");
         for (Map.Entry<String, List<OnChainMetric>> entry : onChainMetrics.entrySet()) {
             String metricName = entry.getKey();
@@ -102,7 +107,7 @@ public class PromptBuilder {
             }
         }
 
-        // ========== 6. 输出要求 ==========
+        // ========== 7. 输出要求 ==========
         sb.append("\n== 输出要求 ==\n");
         sb.append("请综合以上所有数据（技术指标、策略信号、缠论分析、链上数据），严格按以下 JSON 格式输出：\n");
         sb.append("{\n");
@@ -123,11 +128,11 @@ public class PromptBuilder {
     }
 
     /**
-     * 兼容旧调用（无策略结论）。
+     * 兼容旧调用（无策略结论和市场数据）。
      */
     public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
                         Map<String, List<OnChainMetric>> onChainMetrics, BigDecimal currentPrice) {
-        return build(symbol, timeframeAnalyses, onChainMetrics, currentPrice, List.of(), null);
+        return build(symbol, timeframeAnalyses, onChainMetrics, Map.of(), currentPrice, List.of(), null);
     }
 
     // =========================================================================
@@ -241,6 +246,54 @@ public class PromptBuilder {
             sb.append(String.format("缠论参考位: 支撑=%.2f(中枢下沿ZD), 阻力=%.2f(中枢上沿ZG)\n",
                     lastZh.getZd(), lastZh.getZg()));
         }
+    }
+
+    // =========================================================================
+    // 市场情绪数据渲染
+    // =========================================================================
+
+    private void appendMarketData(StringBuilder sb, Map<String, List<OnChainMetric>> marketMetrics) {
+        if (marketMetrics == null || marketMetrics.isEmpty()) return;
+
+        boolean hasData = marketMetrics.values().stream().anyMatch(list -> !list.isEmpty());
+        if (!hasData) return;
+
+        sb.append("\n== 市场情绪数据 ==\n");
+
+        // 资金费率
+        appendSingleMetric(sb, marketMetrics, "funding_rate", "资金费率",
+                "正值=多头拥挤(回调风险), 负值=空头拥挤, |值|>0.1%=极端");
+        appendSingleMetric(sb, marketMetrics, "funding_rate_next", "下期预测费率", null);
+
+        // 持仓量
+        appendSingleMetric(sb, marketMetrics, "open_interest", "合约持仓量(币)",
+                "OI升+价升=趋势健康, OI升+价跌=空头发力, OI降+价升=上涨不持久");
+        appendSingleMetric(sb, marketMetrics, "open_interest_usdt", "合约持仓量(USDT)", null);
+
+        // 恐惧贪婪
+        appendSingleMetric(sb, marketMetrics, "fear_greed_index", "恐惧贪婪指数",
+                "0-24=极度恐惧(常见底部), 25-49=恐惧, 50-74=贪婪, 75-100=极度贪婪(常见顶部)");
+
+        // 爆仓
+        appendSingleMetric(sb, marketMetrics, "liquidation_long_usd", "多头爆仓(USD)",
+                "大量多头爆仓=市场急跌后可能见底");
+        appendSingleMetric(sb, marketMetrics, "liquidation_short_usd", "空头爆仓(USD)",
+                "大量空头爆仓=市场急涨后可能见顶");
+        appendSingleMetric(sb, marketMetrics, "liquidation_long_short_ratio", "多空爆仓比",
+                ">1=多头爆仓多于空头, <1=空头爆仓多于多头");
+    }
+
+    private void appendSingleMetric(StringBuilder sb, Map<String, List<OnChainMetric>> metrics,
+                                     String metricName, String displayName, String explanation) {
+        List<OnChainMetric> values = metrics.get(metricName);
+        if (values == null || values.isEmpty()) return;
+
+        OnChainMetric latest = values.get(0);
+        sb.append("  ").append(displayName).append(": ").append(latest.getValue());
+        if (explanation != null) {
+            sb.append("  (").append(explanation).append(")");
+        }
+        sb.append("\n");
     }
 
     private String trendTypeChinese(ChanResult.TrendType type) {
