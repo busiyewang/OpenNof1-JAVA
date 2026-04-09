@@ -79,6 +79,36 @@ public class AnalysisReport {
     @Column(name = "deepseek_analysis", columnDefinition = "MEDIUMTEXT")
     private String deepseekAnalysis;
 
+    // ========== 交易计划 ==========
+
+    /** 操作建议: BUY_LONG / SELL_SHORT / HOLD / CLOSE */
+    @Column(name = "trade_action", length = 20)
+    private String tradeAction;
+
+    /** 入场价格区间 (JSON: {"low": 81500, "high": 82000}) */
+    @Column(name = "entry_price_range", length = 100)
+    private String entryPriceRange;
+
+    /** 止损价格 */
+    @Column(name = "stop_loss", precision = 20, scale = 8)
+    private BigDecimal stopLoss;
+
+    /** 止盈目标1 */
+    @Column(name = "take_profit_1", precision = 20, scale = 8)
+    private BigDecimal takeProfit1;
+
+    /** 止盈目标2 */
+    @Column(name = "take_profit_2", precision = 20, scale = 8)
+    private BigDecimal takeProfit2;
+
+    /** 建议仓位比例 (%) */
+    @Column(name = "position_percent")
+    private int positionPercent;
+
+    /** 交易计划详情 (JSON) */
+    @Column(name = "trading_plan", columnDefinition = "TEXT")
+    private String tradingPlan;
+
     public enum ReportType {
         DAILY, WEEKLY, ON_DEMAND
     }

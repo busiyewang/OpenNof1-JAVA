@@ -43,6 +43,88 @@
                 <!-- Divider -->
                 <tr><td style="padding:0 30px;"><hr style="border:none;border-top:1px solid #e2e8f0;margin:0;"/></td></tr>
 
+                <!-- Trading Plan -->
+                <tr th:if="${tradeAction != null and tradeAction != 'HOLD'}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">
+                            <span th:style="'display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;background-color:' + ${tradeActionColor}"></span>
+                            交易计划
+                        </h2>
+                        <table width="100%" cellpadding="0" cellspacing="0" style="border:2px solid;border-radius:8px;overflow:hidden;" th:style="'border-color:' + ${tradeActionColor}">
+                            <!-- Action Header -->
+                            <tr>
+                                <td colspan="4" th:style="'padding:12px 16px;color:#fff;font-size:16px;font-weight:700;background-color:' + ${tradeActionColor}" th:text="${tradeActionCn}">做多买入</td>
+                            </tr>
+                            <!-- Price Grid -->
+                            <tr style="background-color:#f7fafc;">
+                                <td style="padding:10px 12px;border-right:1px solid #e2e8f0;width:25%;text-align:center;">
+                                    <p style="margin:0;font-size:11px;color:#718096;">入场价格</p>
+                                    <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#2d3748;" th:text="${entryPriceDisplay}">81,500-82,000</p>
+                                </td>
+                                <td style="padding:10px 12px;border-right:1px solid #e2e8f0;width:25%;text-align:center;">
+                                    <p style="margin:0;font-size:11px;color:#e53e3e;">止损价</p>
+                                    <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#e53e3e;" th:text="${stopLossDisplay}">$80,000</p>
+                                </td>
+                                <td style="padding:10px 12px;border-right:1px solid #e2e8f0;width:25%;text-align:center;">
+                                    <p style="margin:0;font-size:11px;color:#27ae60;">止盈1</p>
+                                    <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#27ae60;" th:text="${tp1Display}">$84,500</p>
+                                </td>
+                                <td style="padding:10px 12px;width:25%;text-align:center;">
+                                    <p style="margin:0;font-size:11px;color:#27ae60;">止盈2</p>
+                                    <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#27ae60;" th:text="${tp2Display}">$87,000</p>
+                                </td>
+                            </tr>
+                            <!-- Details -->
+                            <tr>
+                                <td colspan="4" style="padding:12px 16px;">
+                                    <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#4a5568;">
+                                        <tr>
+                                            <td style="width:80px;font-weight:600;color:#718096;">仓位</td>
+                                            <td th:text="${positionPercentDisplay}">总资金的 30%</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight:600;color:#718096;">风险收益比</td>
+                                            <td th:text="${riskRewardRatio}">1:2.5</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight:600;color:#718096;">持仓时间</td>
+                                            <td th:text="${holdDuration}">1-3天</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight:600;color:#718096;">何时买入</td>
+                                            <td th:text="${entryCondition}">价格回调到81500-82000区间时分批买入</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight:600;color:#718096;">何时卖出</td>
+                                            <td th:text="${exitCondition}">价格触及84500卖出50%，触及87000全部卖出，跌破80000止损</td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <!-- Notes -->
+                            <tr th:if="${not #lists.isEmpty(tradingNotes)}">
+                                <td colspan="4" style="padding:8px 16px 12px;background-color:#fffaf0;border-top:1px solid #e2e8f0;">
+                                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#c05621;">注意事项</p>
+                                    <ul style="margin:0;padding-left:16px;font-size:12px;color:#744210;">
+                                        <li th:each="note : ${tradingNotes}" th:text="${note}" style="margin-bottom:2px;">不要追高</li>
+                                    </ul>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Hold Plan (观望时显示) -->
+                <tr th:if="${tradeAction == 'HOLD'}">
+                    <td style="padding:20px 30px;">
+                        <h2 style="margin:0 0 12px;font-size:16px;color:#2d3748;">交易计划</h2>
+                        <div style="background-color:#f0fff4;border:1px solid #c6f6d5;border-radius:6px;padding:16px;">
+                            <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#2f855a;">当前建议：观望等待</p>
+                            <p style="margin:0;font-size:13px;color:#276749;" th:text="${entryCondition}">等待价格回调至支撑位附近再考虑入场</p>
+                        </div>
+                    </td>
+                </tr>
+
                 <!-- Price Overview -->
                 <tr>
                     <td style="padding:20px 30px;">

@@ -118,6 +118,59 @@ public class AnalysisEmailSender {
         // AI 分析
         ctx.setVariable("deepseekAnalysis", report.getDeepseekAnalysis());
 
+        // 交易计划
+        ctx.setVariable("tradeAction", report.getTradeAction());
+        ctx.setVariable("tradeActionCn", actionToChinese(report.getTradeAction()));
+        ctx.setVariable("tradeActionColor", actionToColor(report.getTradeAction()));
+
+        // 入场价格
+        if (report.getEntryPriceRange() != null) {
+            try {
+                Map<String, Object> range = objectMapper.readValue(report.getEntryPriceRange(),
+                        new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                Object low = range.get("low");
+                Object high = range.get("high");
+                ctx.setVariable("entryPriceDisplay",
+                        String.format("$%s - $%s", formatNum(low), formatNum(high)));
+            } catch (Exception e) {
+                ctx.setVariable("entryPriceDisplay", "-");
+            }
+        } else {
+            ctx.setVariable("entryPriceDisplay", "-");
+        }
+
+        ctx.setVariable("stopLossDisplay", report.getStopLoss() != null ? formatPrice(report.getStopLoss()) : "-");
+        ctx.setVariable("tp1Display", report.getTakeProfit1() != null ? formatPrice(report.getTakeProfit1()) : "-");
+        ctx.setVariable("tp2Display", report.getTakeProfit2() != null ? formatPrice(report.getTakeProfit2()) : "-");
+        ctx.setVariable("positionPercentDisplay",
+                report.getPositionPercent() > 0 ? "总资金的 " + report.getPositionPercent() + "%" : "-");
+
+        // 交易计划详情
+        if (report.getTradingPlan() != null) {
+            try {
+                Map<String, Object> plan = objectMapper.readValue(report.getTradingPlan(),
+                        new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                ctx.setVariable("entryCondition", plan.getOrDefault("entryCondition", "暂无"));
+                ctx.setVariable("exitCondition", plan.getOrDefault("exitCondition", "暂无"));
+                ctx.setVariable("holdDuration", plan.getOrDefault("holdDuration", "-"));
+                ctx.setVariable("riskRewardRatio", plan.getOrDefault("riskRewardRatio", "-"));
+                Object notes = plan.get("tradingNotes");
+                ctx.setVariable("tradingNotes", notes instanceof List ? notes : List.of());
+            } catch (Exception e) {
+                ctx.setVariable("entryCondition", "暂无");
+                ctx.setVariable("exitCondition", "暂无");
+                ctx.setVariable("holdDuration", "-");
+                ctx.setVariable("riskRewardRatio", "-");
+                ctx.setVariable("tradingNotes", List.of());
+            }
+        } else {
+            ctx.setVariable("entryCondition", "暂无");
+            ctx.setVariable("exitCondition", "暂无");
+            ctx.setVariable("holdDuration", "-");
+            ctx.setVariable("riskRewardRatio", "-");
+            ctx.setVariable("tradingNotes", List.of());
+        }
+
         return ctx;
     }
 
@@ -215,5 +268,36 @@ public class AnalysisEmailSender {
             case HIGH     -> "#e74c3c";
             case EXTREME  -> "#c0392b";
         };
+    }
+
+    private String actionToChinese(String action) {
+        if (action == null) return "观望";
+        return switch (action.toUpperCase()) {
+            case "BUY_LONG"   -> "做多买入";
+            case "SELL_SHORT" -> "做空卖出";
+            case "CLOSE"      -> "平仓离场";
+            case "HOLD"       -> "观望等待";
+            default           -> action;
+        };
+    }
+
+    private String actionToColor(String action) {
+        if (action == null) return "#718096";
+        return switch (action.toUpperCase()) {
+            case "BUY_LONG"   -> "#27ae60";
+            case "SELL_SHORT" -> "#e74c3c";
+            case "CLOSE"      -> "#f39c12";
+            default           -> "#718096";
+        };
+    }
+
+    private String formatNum(Object value) {
+        if (value == null) return "-";
+        try {
+            double d = Double.parseDouble(String.valueOf(value));
+            return String.format("%,.2f", d);
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
     }
 }

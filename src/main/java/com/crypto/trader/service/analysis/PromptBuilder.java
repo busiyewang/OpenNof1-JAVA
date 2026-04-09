@@ -109,20 +109,41 @@ public class PromptBuilder {
 
         // ========== 7. 输出要求 ==========
         sb.append("\n== 输出要求 ==\n");
-        sb.append("请综合以上所有数据（技术指标、策略信号、缠论分析、链上数据），严格按以下 JSON 格式输出：\n");
+        sb.append("请综合以上所有数据，给出【具体可执行的交易计划】，严格按以下 JSON 格式输出：\n\n");
+        sb.append("重要：交易计划必须明确告诉用户「现在该做什么、在哪个价格买、在哪个价格卖、亏了怎么办」。\n");
+        sb.append("如果判断应该观望，action 填 HOLD 并说明等待什么条件再入场。\n\n");
         sb.append("{\n");
         sb.append("  \"trendDirection\": \"BULLISH|BEARISH|NEUTRAL|STRONGLY_BULLISH|STRONGLY_BEARISH\",\n");
         sb.append("  \"confidence\": 0.0-1.0,\n");
         sb.append("  \"supportLevel\": 价格数值,\n");
         sb.append("  \"resistanceLevel\": 价格数值,\n");
         sb.append("  \"riskLevel\": \"LOW|MODERATE|HIGH|EXTREME\",\n");
-        sb.append("  \"shortTermOutlook\": \"1-3天展望文字\",\n");
-        sb.append("  \"mediumTermOutlook\": \"1-2周展望文字\",\n");
+        sb.append("  \"shortTermOutlook\": \"1-3天展望\",\n");
+        sb.append("  \"mediumTermOutlook\": \"1-2周展望\",\n");
         sb.append("  \"riskFactors\": [\"风险1\", \"风险2\"],\n");
         sb.append("  \"keyIndicatorAnalysis\": {\"MACD\": \"分析\", \"BollingerBands\": \"分析\", \"缠论\": \"分析\"},\n");
         sb.append("  \"onChainInsights\": {\"整体\": \"分析\"},\n");
-        sb.append("  \"reasoning\": \"完整推理过程，需说明如何综合各策略信号和缠论分析得出结论\"\n");
-        sb.append("}\n");
+        sb.append("  \"reasoning\": \"完整推理过程\",\n");
+        sb.append("\n");
+        sb.append("  // ====== 交易计划（核心，必须填写） ======\n");
+        sb.append("  \"action\": \"BUY_LONG|SELL_SHORT|HOLD|CLOSE\",\n");
+        sb.append("  \"entryPriceLow\": 建议入场价格下限（挂单价）,\n");
+        sb.append("  \"entryPriceHigh\": 建议入场价格上限（市价追入的最高可接受价）,\n");
+        sb.append("  \"stopLoss\": 止损价格（必须设置，亏损超过此价立即卖出）,\n");
+        sb.append("  \"takeProfit1\": 止盈目标1（保守目标，到达后可卖出50%仓位）,\n");
+        sb.append("  \"takeProfit2\": 止盈目标2（激进目标，到达后全部卖出）,\n");
+        sb.append("  \"positionPercent\": 建议仓位占总资金百分比（10-100的整数）,\n");
+        sb.append("  \"entryCondition\": \"入场条件：描述在什么情况下执行买入，例如'价格回调到81500-82000区间时分批买入'\",\n");
+        sb.append("  \"exitCondition\": \"出场条件：描述在什么情况下卖出，例如'价格触及85000或跌破80500时卖出'\",\n");
+        sb.append("  \"holdDuration\": \"预计持仓时间，例如'1-3天'或'观望至明日'\",\n");
+        sb.append("  \"riskRewardRatio\": \"风险收益比，例如'1:2.5（亏1500赚3750）'\",\n");
+        sb.append("  \"tradingNotes\": [\"注意事项1（如：不要追高）\", \"注意事项2（如：分批建仓）\"]\n");
+        sb.append("}\n\n");
+        sb.append("注意：\n");
+        sb.append("- 所有价格必须是具体数值，不能用"大约"、"附近"等模糊表述\n");
+        sb.append("- 止损必须设置，这是保护资金的底线\n");
+        sb.append("- positionPercent 根据置信度和风险等级调整：高置信度+低风险=50-80%, 低置信度+高风险=10-20%\n");
+        sb.append("- 如果 action=HOLD，入场价格和止损止盈可以填0，但必须在 entryCondition 说明等待什么信号再入场\n");
 
         return sb.toString();
     }

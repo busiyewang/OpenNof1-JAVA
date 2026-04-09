@@ -250,6 +250,35 @@ public class AnalysisService {
             builder.priceResistance(BigDecimal.valueOf(result.getResistanceLevel()));
         }
 
+        // 交易计划
+        builder.tradeAction(result.getAction());
+        builder.positionPercent(result.getPositionPercent());
+
+        if (result.getEntryPriceLow() > 0 || result.getEntryPriceHigh() > 0) {
+            builder.entryPriceRange(String.format("{\"low\":%.2f,\"high\":%.2f}",
+                    result.getEntryPriceLow(), result.getEntryPriceHigh()));
+        }
+        if (result.getStopLoss() > 0) {
+            builder.stopLoss(BigDecimal.valueOf(result.getStopLoss()));
+        }
+        if (result.getTakeProfit1() > 0) {
+            builder.takeProfit1(BigDecimal.valueOf(result.getTakeProfit1()));
+        }
+        if (result.getTakeProfit2() > 0) {
+            builder.takeProfit2(BigDecimal.valueOf(result.getTakeProfit2()));
+        }
+
+        // 交易计划 JSON
+        try {
+            Map<String, Object> plan = new LinkedHashMap<>();
+            plan.put("entryCondition", result.getEntryCondition());
+            plan.put("exitCondition", result.getExitCondition());
+            plan.put("holdDuration", result.getHoldDuration());
+            plan.put("riskRewardRatio", result.getRiskRewardRatio());
+            plan.put("tradingNotes", result.getTradingNotes());
+            builder.tradingPlan(objectMapper.writeValueAsString(plan));
+        } catch (Exception ignored) {}
+
         // JSON 字段
         try {
             builder.timeframesSummary(objectMapper.writeValueAsString(tfAnalyses));
