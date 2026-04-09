@@ -41,6 +41,10 @@ public interface KlineRepository extends JpaRepository<Kline, Long> {
     /** 按 symbol 和时间范围查询 K 线（用于预测回溯评分） */
     List<Kline> findBySymbolAndTimestampBetween(String symbol, Instant from, Instant to);
 
+    /** 按 symbol + interval + 时间范围查询（用于回测） */
+    List<Kline> findBySymbolAndIntervalAndTimestampBetween(String symbol, String interval,
+                                                           Instant from, Instant to);
+
     /** 批量查询已存在的时间戳（用于回填去重，替代 N+1 的 exists 查询） */
     @Query("SELECT k.timestamp FROM Kline k WHERE k.symbol = :symbol AND k.interval = :interval AND k.timestamp IN :timestamps")
     List<Instant> findExistingTimestamps(@Param("symbol") String symbol,
