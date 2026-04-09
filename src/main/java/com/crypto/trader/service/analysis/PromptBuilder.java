@@ -140,7 +140,7 @@ public class PromptBuilder {
         sb.append("  \"tradingNotes\": [\"注意事项1（如：不要追高）\", \"注意事项2（如：分批建仓）\"]\n");
         sb.append("}\n\n");
         sb.append("注意：\n");
-        sb.append("- 所有价格必须是具体数值，不能用"大约"、"附近"等模糊表述\n");
+        sb.append("- 所有价格必须是具体数值，不能用'大约'、'附近'等模糊表述\n");
         sb.append("- 止损必须设置，这是保护资金的底线\n");
         sb.append("- positionPercent 根据置信度和风险等级调整：高置信度+低风险=50-80%, 低置信度+高风险=10-20%\n");
         sb.append("- 如果 action=HOLD，入场价格和止损止盈可以填0，但必须在 entryCondition 说明等待什么信号再入场\n");
