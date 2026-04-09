@@ -6,11 +6,15 @@ import com.crypto.trader.client.mcp.dto.TimeframeAnalysis;
 import com.crypto.trader.model.AnalysisReport;
 import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.OnChainMetric;
+import com.crypto.trader.model.Signal;
 import com.crypto.trader.repository.AnalysisReportRepository;
 import com.crypto.trader.repository.KlineRepository;
 import com.crypto.trader.repository.OnChainMetricRepository;
 import com.crypto.trader.service.indicator.BollingerBandsCalculator;
+import com.crypto.trader.service.indicator.ChanCalculator;
 import com.crypto.trader.service.indicator.MacdCalculator;
+import com.crypto.trader.service.indicator.chan.ChanResult;
+import com.crypto.trader.service.strategy.TradingStrategy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +58,12 @@ public class AnalysisService {
 
     @Autowired
     private AnalysisReportRepository reportRepository;
+
+    @Autowired
+    private List<TradingStrategy> strategies;
+
+    @Autowired
+    private ChanCalculator chanCalculator;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -117,18 +127,41 @@ public class AnalysisService {
             onChainMetrics.put(metricName, metrics);
         }
 
-        // 3. 构建 Prompt
-        String prompt = promptBuilder.build(symbol, tfAnalyses, onChainMetrics, currentPrice);
+        // 3. 运行策略引擎，获取各策略结论
+        List<Kline> latestKlines = klineRepository.findLatestKlines(symbol, "1h", 100);
+        latestKlines.sort(Comparator.comparing(Kline::getTimestamp));
+
+        List<OnChainMetric> whaleMetrics = onChainRepository.findTop100BySymbol(symbol, "whale_transfer_volume");
+
+        List<Signal> strategySignals = new ArrayList<>();
+        for (TradingStrategy strategy : strategies) {
+            try {
+                Signal signal = strategy.evaluate(symbol, latestKlines, whaleMetrics);
+                if (signal != null) {
+                    strategySignals.add(signal);
+                }
+            } catch (Exception e) {
+                log.warn("[分析] {} 策略 {} 执行异常: {}", symbol, strategy.getName(), e.getMessage());
+            }
+        }
+        log.info("[分析] {} 策略引擎完成: {} 个策略返回信号", symbol, strategySignals.size());
+
+        // 4. 运行缠论分析，获取详细结构
+        ChanResult chanResult = chanCalculator.calculate(latestKlines);
+
+        // 5. 构建 Prompt（含策略结论和缠论分析）
+        String prompt = promptBuilder.build(symbol, tfAnalyses, onChainMetrics, currentPrice,
+                strategySignals, chanResult);
         log.info("[分析] {} Prompt 构建完成，长度: {} 字符", symbol, prompt.length());
 
-        // 4. 调用 DeepSeek
+        // 6. 调用 DeepSeek
         log.info("[分析] {} 调用 DeepSeek 进行分析...", symbol);
         String rawResponse = mcpClient.analyze(prompt);
 
-        // 5. 解析结果
+        // 7. 解析结果
         DeepSeekAnalysisResult result = responseParser.parse(rawResponse);
 
-        // 6. 构建并保存报告
+        // 8. 构建并保存报告
         AnalysisReport report = buildReport(symbol, reportType, result, tfAnalyses, onChainMetrics, currentPrice);
         reportRepository.save(report);
 

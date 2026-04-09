@@ -2,6 +2,8 @@ package com.crypto.trader.service.analysis;
 
 import com.crypto.trader.client.mcp.dto.TimeframeAnalysis;
 import com.crypto.trader.model.OnChainMetric;
+import com.crypto.trader.model.Signal;
+import com.crypto.trader.service.indicator.chan.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -23,15 +25,11 @@ public class PromptBuilder {
     private PredictionScorerService predictionScorerService;
 
     /**
-     * 构建完整的分析 prompt。
-     *
-     * @param symbol             交易对
-     * @param timeframeAnalyses  各时间框架的技术分析数据
-     * @param onChainMetrics     链上指标（按指标名分组）
-     * @param currentPrice       当前价格
+     * 构建完整的分析 prompt（含策略结论和缠论分析）。
      */
     public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
-                        Map<String, List<OnChainMetric>> onChainMetrics, BigDecimal currentPrice) {
+                        Map<String, List<OnChainMetric>> onChainMetrics, BigDecimal currentPrice,
+                        List<Signal> strategySignals, ChanResult chanResult) {
         StringBuilder sb = new StringBuilder();
 
         // ========== 0. 历史表现反馈（进化核心） ==========
@@ -40,8 +38,11 @@ public class PromptBuilder {
         // ========== 1. 系统指令 ==========
         sb.append("你是一个专业的加密货币分析师。请基于以下数据给出严谨的市场分析。\n");
         sb.append("重要规则：\n");
+        sb.append("- 下面提供了多个策略引擎的独立判断结论，请综合参考但不要盲目跟随\n");
+        sb.append("- 当多个策略方向一致时，可适当提高置信度；方向矛盾时，需给出更审慎的判断\n");
+        sb.append("- 缠论分析提供了笔、中枢、走势类型和买卖点信息，请结合技术指标综合判断\n");
         sb.append("- 如果数据不足以得出结论，降低置信度而不是强行给出方向\n");
-        sb.append("- 支撑位和阻力位必须基于实际的技术分析结果，不要凭空推测\n");
+        sb.append("- 支撑位和阻力位必须基于实际的技术分析结果（如中枢上下沿、布林带），不要凭空推测\n");
         sb.append("- 明确区分短期（1-3天）和中期（1-2周）的展望\n");
         sb.append("- 风险评估要具体，列出可量化的风险因子\n\n");
 
@@ -67,7 +68,13 @@ public class PromptBuilder {
               .append(", lower=").append(formatDouble(tf.getBollingerLower())).append("\n");
         }
 
-        // 链上数据
+        // ========== 3. 策略引擎结论 ==========
+        appendStrategySignals(sb, strategySignals);
+
+        // ========== 4. 缠论详细分析 ==========
+        appendChanAnalysis(sb, chanResult);
+
+        // ========== 5. 链上数据 ==========
         sb.append("\n== 链上数据指标 ==\n");
         for (Map.Entry<String, List<OnChainMetric>> entry : onChainMetrics.entrySet()) {
             String metricName = entry.getKey();
@@ -95,9 +102,9 @@ public class PromptBuilder {
             }
         }
 
-        // ========== 3. 输出要求 ==========
+        // ========== 6. 输出要求 ==========
         sb.append("\n== 输出要求 ==\n");
-        sb.append("请严格按以下 JSON 格式输出分析结果：\n");
+        sb.append("请综合以上所有数据（技术指标、策略信号、缠论分析、链上数据），严格按以下 JSON 格式输出：\n");
         sb.append("{\n");
         sb.append("  \"trendDirection\": \"BULLISH|BEARISH|NEUTRAL|STRONGLY_BULLISH|STRONGLY_BEARISH\",\n");
         sb.append("  \"confidence\": 0.0-1.0,\n");
@@ -107,12 +114,152 @@ public class PromptBuilder {
         sb.append("  \"shortTermOutlook\": \"1-3天展望文字\",\n");
         sb.append("  \"mediumTermOutlook\": \"1-2周展望文字\",\n");
         sb.append("  \"riskFactors\": [\"风险1\", \"风险2\"],\n");
-        sb.append("  \"keyIndicatorAnalysis\": {\"MACD\": \"分析\", \"BollingerBands\": \"分析\"},\n");
+        sb.append("  \"keyIndicatorAnalysis\": {\"MACD\": \"分析\", \"BollingerBands\": \"分析\", \"缠论\": \"分析\"},\n");
         sb.append("  \"onChainInsights\": {\"整体\": \"分析\"},\n");
-        sb.append("  \"reasoning\": \"完整推理过程\"\n");
+        sb.append("  \"reasoning\": \"完整推理过程，需说明如何综合各策略信号和缠论分析得出结论\"\n");
         sb.append("}\n");
 
         return sb.toString();
+    }
+
+    /**
+     * 兼容旧调用（无策略结论）。
+     */
+    public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
+                        Map<String, List<OnChainMetric>> onChainMetrics, BigDecimal currentPrice) {
+        return build(symbol, timeframeAnalyses, onChainMetrics, currentPrice, List.of(), null);
+    }
+
+    // =========================================================================
+    // 策略引擎结论渲染
+    // =========================================================================
+
+    private void appendStrategySignals(StringBuilder sb, List<Signal> signals) {
+        if (signals == null || signals.isEmpty()) return;
+
+        sb.append("\n== 策略引擎实时结论 ==\n");
+        sb.append("以下是各独立策略引擎对当前行情的判断（基于最新1h K线数据）：\n\n");
+
+        long buyCount = 0, sellCount = 0, holdCount = 0;
+
+        for (Signal signal : signals) {
+            String action = signal.getAction() != null ? signal.getAction().name() : "HOLD";
+            sb.append("- ").append(signal.getStrategyName()).append(": ")
+              .append(action);
+
+            if (signal.getAction() != Signal.Action.HOLD) {
+                sb.append(" | 置信度=").append(String.format("%.0f%%", signal.getConfidence() * 100));
+                if (signal.getPrice() > 0) {
+                    sb.append(" | 价格=").append(formatDouble(signal.getPrice()));
+                }
+            }
+            if (signal.getReason() != null && !signal.getReason().isBlank()) {
+                // 截断过长的 reason
+                String reason = signal.getReason().length() > 150
+                        ? signal.getReason().substring(0, 150) + "..."
+                        : signal.getReason();
+                sb.append(" | 原因: ").append(reason);
+            }
+            sb.append("\n");
+
+            if (signal.getAction() == Signal.Action.BUY) buyCount++;
+            else if (signal.getAction() == Signal.Action.SELL) sellCount++;
+            else holdCount++;
+        }
+
+        sb.append("\n策略共识: BUY=").append(buyCount)
+          .append(" SELL=").append(sellCount)
+          .append(" HOLD=").append(holdCount);
+
+        if (buyCount > sellCount && buyCount > holdCount) {
+            sb.append(" → 多数策略偏多");
+        } else if (sellCount > buyCount && sellCount > holdCount) {
+            sb.append(" → 多数策略偏空");
+        } else if (buyCount > 0 && sellCount > 0) {
+            sb.append(" → 策略信号矛盾，需谨慎判断");
+        } else {
+            sb.append(" → 无明确方向");
+        }
+        sb.append("\n");
+    }
+
+    // =========================================================================
+    // 缠论分析渲染
+    // =========================================================================
+
+    private void appendChanAnalysis(StringBuilder sb, ChanResult chanResult) {
+        if (chanResult == null) return;
+
+        sb.append("\n== 缠论分析 ==\n");
+
+        // 走势类型
+        sb.append("走势类型: ").append(trendTypeChinese(chanResult.getTrendType())).append("\n");
+        sb.append("背驰状态: ").append(divergenceTypeChinese(chanResult.getDivergenceType())).append("\n");
+
+        // 笔的概况
+        sb.append("笔数: ").append(chanResult.getBiList().size());
+        if (!chanResult.getBiList().isEmpty()) {
+            ChanBi lastBi = chanResult.getBiList().get(chanResult.getBiList().size() - 1);
+            sb.append(" | 最新笔: ").append(lastBi.getDirection() == ChanBi.Direction.UP ? "向上" : "向下")
+              .append(" ").append(lastBi.getStartPrice()).append("→").append(lastBi.getEndPrice());
+        }
+        sb.append("\n");
+
+        // 中枢信息
+        sb.append("中枢数: ").append(chanResult.getZhongshuList().size()).append("\n");
+        for (int i = 0; i < chanResult.getZhongshuList().size(); i++) {
+            ChanZhongshu zh = chanResult.getZhongshuList().get(i);
+            sb.append(String.format("  中枢%d: 上沿ZG=%.2f, 下沿ZD=%.2f, 最高GG=%.2f, 最低DD=%.2f, 中心=%.2f, 包含%d笔\n",
+                    i + 1, zh.getZg(), zh.getZd(), zh.getGg(), zh.getDd(),
+                    zh.getCenter(), zh.getBiList().size()));
+        }
+
+        // 线段信息
+        if (!chanResult.getSegments().isEmpty()) {
+            sb.append("线段数: ").append(chanResult.getSegments().size()).append("\n");
+            ChanSegment lastSeg = chanResult.getSegments().get(chanResult.getSegments().size() - 1);
+            sb.append("  最新线段: ").append(lastSeg.getDirection() == ChanSegment.Direction.UP ? "上升" : "下降")
+              .append(" ").append(lastSeg.getStartPrice()).append("→").append(lastSeg.getEndPrice())
+              .append(", 包含").append(lastSeg.getBiList().size()).append("笔\n");
+        }
+
+        // 买卖点信号
+        if (!chanResult.getSignalPoints().isEmpty()) {
+            sb.append("缠论买卖点信号:\n");
+            for (ChanSignalPoint sp : chanResult.getSignalPoints()) {
+                sb.append(String.format("  - %s: 价格=%.2f, 置信度=%.0f%%, %s\n",
+                        sp.getPointType(), sp.getPrice(),
+                        sp.getConfidence() * 100, sp.getDescription()));
+            }
+        } else {
+            sb.append("缠论买卖点: 当前无买卖点信号\n");
+        }
+
+        // 中枢对支撑阻力位的参考
+        if (!chanResult.getZhongshuList().isEmpty()) {
+            ChanZhongshu lastZh = chanResult.getZhongshuList().get(chanResult.getZhongshuList().size() - 1);
+            sb.append(String.format("缠论参考位: 支撑=%.2f(中枢下沿ZD), 阻力=%.2f(中枢上沿ZG)\n",
+                    lastZh.getZd(), lastZh.getZg()));
+        }
+    }
+
+    private String trendTypeChinese(ChanResult.TrendType type) {
+        if (type == null) return "未知";
+        return switch (type) {
+            case TREND_UP -> "上涨趋势（≥2个中枢依次抬高）";
+            case TREND_DOWN -> "下跌趋势（≥2个中枢依次降低）";
+            case CONSOLIDATION -> "盘整（1个中枢内震荡）";
+            case UNKNOWN -> "未知（数据不足）";
+        };
+    }
+
+    private String divergenceTypeChinese(ChanResult.DivergenceType type) {
+        if (type == null) return "无背驰";
+        return switch (type) {
+            case TREND_DIVERGENCE -> "趋势背驰（力度衰减，可能反转）";
+            case CONSOLIDATION_DIVERGENCE -> "盘整背驰（可能继续震荡）";
+            case NONE -> "无背驰";
+        };
     }
 
     /**
