@@ -108,6 +108,149 @@ public class OkxClient implements ExchangeClient {
         }
     }
 
+    /**
+     * 拉取历史 K 线数据（自动分页）。
+     *
+     * <p>OKX 每次最多返回 100 条，本方法会从 endTime 向前循环拉取，
+     * 直到达到 startTime 或无更多数据。</p>
+     *
+     * <p>OKX 有两个端点：</p>
+     * <ul>
+     *   <li>/api/v5/market/candles — 最近的K线数据</li>
+     *   <li>/api/v5/market/history-candles — 更早的历史数据</li>
+     * </ul>
+     * 本方法会先用 candles 端点，数据不足时自动切换到 history-candles。
+     *
+     * @param symbol    交易对
+     * @param interval  K线周期
+     * @param startTime 起始时间（epoch millis）
+     * @param endTime   结束时间（epoch millis）
+     * @param sleepMs   每次请求间隔（毫秒），避免触发限流，建议 350ms
+     * @return 全部 K 线（按时间正序）
+     */
+    public List<Kline> getKlinesHistory(String symbol, String interval, long startTime, long endTime, long sleepMs) {
+        List<Kline> allKlines = new ArrayList<>();
+        long cursor = endTime;
+        int page = 0;
+        boolean useHistory = false;
+
+        while (cursor > startTime) {
+            page++;
+            String endpoint = useHistory ? "/api/v5/market/history-candles" : "/api/v5/market/candles";
+
+            List<Kline> batch = fetchOnePage(symbol, interval, cursor, endpoint);
+
+            if (batch.isEmpty()) {
+                if (!useHistory) {
+                    // candles 端点没数据了，切换到 history-candles
+                    useHistory = true;
+                    log.info("[OKX REST] candles 端点无更多数据，切换到 history-candles, cursor={}",
+                            Instant.ofEpochMilli(cursor));
+                    continue;
+                }
+                log.info("[OKX REST] 历史K线拉取完成：无更多数据，共 {} 条", allKlines.size());
+                break;
+            }
+
+            // 过滤掉 startTime 之前的数据
+            for (Kline k : batch) {
+                if (k.getTimestamp().toEpochMilli() >= startTime) {
+                    allKlines.add(k);
+                }
+            }
+
+            // OKX 返回的数据按时间倒序，最后一条是最早的
+            long oldestTs = batch.stream()
+                    .mapToLong(k -> k.getTimestamp().toEpochMilli())
+                    .min().orElse(cursor);
+
+            if (oldestTs >= cursor) {
+                // 没有更早的数据了
+                break;
+            }
+            cursor = oldestTs;
+
+            log.info("[OKX REST] 历史K线第{}页: 获取{}条, 最早={}, 累计={}",
+                    page, batch.size(), Instant.ofEpochMilli(oldestTs), allKlines.size());
+
+            // 限流保护
+            if (sleepMs > 0) {
+                try { Thread.sleep(sleepMs); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }
+        }
+
+        // 按时间正序排列
+        allKlines.sort(Comparator.comparing(Kline::getTimestamp));
+        log.info("[OKX REST] 历史K线拉取完成: {}:{} 共 {} 条, 范围 {} ~ {}",
+                symbol, interval, allKlines.size(),
+                allKlines.isEmpty() ? "-" : allKlines.get(0).getTimestamp(),
+                allKlines.isEmpty() ? "-" : allKlines.get(allKlines.size() - 1).getTimestamp());
+
+        return allKlines;
+    }
+
+    /**
+     * 拉取一页 K 线（最多100条）。
+     *
+     * @param cursor   从此时间点向前拉取（OKX after 参数）
+     * @param endpoint API 端点路径
+     */
+    private List<Kline> fetchOnePage(String symbol, String interval, long cursor, String endpoint) {
+        String instId = toOkxInstId(symbol);
+        String bar = toOkxBar(interval);
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(endpoint)
+                            .queryParam("instId", instId)
+                            .queryParam("bar", bar)
+                            .queryParam("after", String.valueOf(cursor))
+                            .queryParam("limit", "100")
+                            .build())
+                    .header("Content-Type", "application/json")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .timeout(REQUEST_TIMEOUT)
+                    .block();
+
+            if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
+                log.warn("[OKX REST] 历史K线响应异常: {}", response);
+                return List.of();
+            }
+
+            Object dataObj = response.get("data");
+            if (!(dataObj instanceof List)) return List.of();
+
+            List<?> data = (List<?>) dataObj;
+            List<Kline> result = new ArrayList<>(data.size());
+
+            for (Object item : data) {
+                if (!(item instanceof List)) continue;
+                List<?> arr = (List<?>) item;
+                if (arr.size() < 6) continue;
+
+                long ts = Long.parseLong(String.valueOf(arr.get(0)));
+                Kline k = new Kline();
+                k.setSymbol(symbol);
+                k.setInterval(interval);
+                k.setTimestamp(Instant.ofEpochMilli(ts));
+                k.setOpen(new BigDecimal(String.valueOf(arr.get(1))));
+                k.setHigh(new BigDecimal(String.valueOf(arr.get(2))));
+                k.setLow(new BigDecimal(String.valueOf(arr.get(3))));
+                k.setClose(new BigDecimal(String.valueOf(arr.get(4))));
+                k.setVolume(new BigDecimal(String.valueOf(arr.get(5))));
+                result.add(k);
+            }
+
+            return result;
+        } catch (Exception e) {
+            log.error("[OKX REST] 历史K线拉取异常: {}:{} error={}", symbol, interval, e.getMessage());
+            return List.of();
+        }
+    }
+
     /** BTCUSDT -> BTC-USDT */
     String toOkxInstId(String symbol) {
         if (symbol == null || symbol.length() < 4) return symbol;
