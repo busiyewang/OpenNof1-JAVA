@@ -48,6 +48,10 @@ crypto:
     api-key: ${GLASSNODE_API_KEY:your-glassnode-api-key}
     base-url: https://api.glassnode.com
 
+  # ========== Coinglass 爆仓数据 ==========
+  coinglass:
+    api-key: ${COINGLASS_API_KEY:your-coinglass-api-key}  # 免费注册: https://www.coinglass.com/
+
   # ========== DeepSeek AI 分析 ==========
   mcp:
     enabled: true
