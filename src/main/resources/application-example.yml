@@ -2,12 +2,12 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/crypto_trader?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&useSSL=false
     username: root
-    password: my-secret-pw
+    password: your-database-password
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
@@ -19,8 +19,8 @@ spring:
   mail:
     host: ${MAIL_HOST:smtp.qq.com}
     port: ${MAIL_PORT:465}
-    username: ${MAIL_USERNAME:2900115167@qq.com}
-    password: ${MAIL_PASSWORD:your-qq-authorization-code}
+    username: ${MAIL_USERNAME:your-email@qq.com}
+    password: ${MAIL_PASSWORD:your-smtp-authorization-code}
     properties:
       mail:
         smtp:
@@ -31,18 +31,24 @@ spring:
             enable: false
 
 crypto:
-#  , ETHUSDT, SOLUSDT
+  # 关注的交易对（逗号分隔可添加多个，如: BTCUSDT,ETHUSDT,SOLUSDT）
   watch-list: BTCUSDT
+
+  # ========== 交易所配置 ==========
   exchange:
     okx:
-      api-key: ${OKX_API_KEY:8c2fbccd-35e1-4a09-92b6-7510d0cf5509}
-      secret-key: ${OKX_SECRET_KEY:48BF9F7E6DC2FC48555E1ED15D6F7AAA}
-      passphrase: ${OKX_PASSPHRASE:Yw!158452}
+      api-key: ${OKX_API_KEY:your-okx-api-key}
+      secret-key: ${OKX_SECRET_KEY:your-okx-secret-key}
+      passphrase: ${OKX_PASSPHRASE:your-okx-passphrase}
       base-url: https://www.okx.com
-      simulated: false  # true 启用模拟盘（demo trading）
+      simulated: false      # true = 模拟盘, false = 实盘
+
+  # ========== Glassnode 链上数据 ==========
   glassnode:
-    api-key: ${GLASSNODE_API_KEY:myapi_sk_7b751e55c42ab7f96191d3d306a611e7}
+    api-key: ${GLASSNODE_API_KEY:your-glassnode-api-key}
     base-url: https://api.glassnode.com
+
+  # ========== DeepSeek AI 分析 ==========
   mcp:
     enabled: true
     provider: deepseek
@@ -50,24 +56,37 @@ crypto:
     base-url: https://api.deepseek.com/v1/chat/completions
     model: deepseek-chat
     timeout-seconds: 60
+
+  # ========== 通知配置 ==========
   notifier:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:your-telegram-bot-token}
       chat-id: ${TELEGRAM_CHAT_ID:your-chat-id}
     email:
-      from: ${MAIL_FROM:2900115167@qq.com}
-      to: ${MAIL_TO:2900115167@qq.com}
+      from: ${MAIL_FROM:your-email@qq.com}
+      to: ${MAIL_TO:your-email@qq.com}
+
+  # ========== 代理配置（翻墙用） ==========
   proxy:
-    enabled: ${PROXY_ENABLED:true}
+    enabled: ${PROXY_ENABLED:false}
     host: ${PROXY_HOST:127.0.0.1}
     port: ${PROXY_PORT:7890}
+
+  # ========== 交易模式（仅分析，不实际交易） ==========
   trading:
-    mode: paper  # paper or live
+    mode: paper             # paper = 模拟, live = 实盘（当前仅支持 paper）
     max-position-size-usdt: 1000
     max-daily-trades: 10
+
+  # ========== AI 分析调度 ==========
   analysis:
-    timeframes: 1h,4h,1d
-    kline-count-per-timeframe: 100
-    daily-cron: "0 0 8 * * ?"
-    weekly-cron: "0 0 9 ? * MON"
+    timeframes: 1h,4h,1d    # 分析的时间框架
+    kline-count-per-timeframe: 100  # 每个时间框架拉取的K线条数
+    daily-cron: "0 0 8 * * ?"      # 每日分析时间（默认早8点）
+    weekly-cron: "0 0 9 ? * MON"   # 每周分析时间（默认周一早9点）
     timezone: Asia/Shanghai
+
+  # ========== 消息通知调度 ==========
+  summary:
+    morning-cron: "0 0 9 * * ?"    # 早间通知（默认早9点）
+    noon-cron: "0 0 13 * * ?"      # 午间通知（默认下午1点）
