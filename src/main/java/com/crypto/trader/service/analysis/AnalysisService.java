@@ -165,14 +165,23 @@ public class AnalysisService {
         // 4. 运行缠论分析，获取详细结构
         ChanResult chanResult = chanCalculator.calculate(latestKlines);
 
-        // 4.5 运行 ML 模型预测
+        // 4.5 运行 ML 模型预测（多时间框架）
         MlPrediction mlPrediction = null;
         if (mlModelService.isModelReady(symbol, "1h")) {
-            // 收集所有链上指标用于 ML 特征
+            // 收集所有链上指标
             List<OnChainMetric> allOnChainForMl = new ArrayList<>();
             onChainMetrics.values().forEach(allOnChainForMl::addAll);
             Map<String, BigDecimal> onChainMap = featureEngineer.buildOnChainMap(allOnChainForMl);
-            mlPrediction = mlModelService.predict(symbol, "1h", latestKlines, onChainMap);
+
+            // 构建多时间框架K线 map
+            Map<String, List<Kline>> mlKlinesByTf = new LinkedHashMap<>();
+            for (String tf : timeframes) {
+                List<Kline> tfKlines = klineRepository.findLatestKlines(symbol, tf, 100);
+                tfKlines.sort(Comparator.comparing(Kline::getTimestamp));
+                mlKlinesByTf.put(tf, tfKlines);
+            }
+
+            mlPrediction = mlModelService.predictMultiTf(symbol, mlKlinesByTf, onChainMap);
             if (mlPrediction != null) {
                 log.info("[分析] {} ML预测: {} (置信度={}%)", symbol,
                         mlPrediction.getDirection(),

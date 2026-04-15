@@ -12,13 +12,14 @@ import java.math.BigDecimal;
 import java.util.*;
 
 /**
- * 特征工程服务 — 基于 TA4J 从 K 线和链上数据中提取 ML 模型所需的数值特征。
+ * 多时间框架特征工程服务。
  *
- * <p>改进点（对比旧版手写计算）：</p>
+ * <p>从 1h + 4h + 1d 三个时间框架提取 TA4J 指标，加上价格/成交量/K线形态/链上数据。</p>
  * <ul>
- *   <li>所有技术指标统一由 TA4J 计算，精度更高、维护成本低</li>
- *   <li>新增 ATR(波动率)、ADX(趋势强度)、Stochastic(KDJ)、OBV(量价)、CCI、WilliamsR</li>
- *   <li>特征从 28 维扩展到 40 维，信息密度显著提升</li>
+ *   <li>每个时间框架提取 22 个 TA4J 指标特征</li>
+ *   <li>主时间框架(1h)额外提取 9 个价格/成交量/K线形态特征</li>
+ *   <li>6 个链上数据特征</li>
+ *   <li>总计: 9 + 22*3 + 6 = 81 维特征</li>
  * </ul>
  */
 @Service
@@ -28,152 +29,100 @@ public class FeatureEngineerService {
 
     private final Ta4jIndicatorService ta4jService;
 
-    /** 特征名称列表（与 extractFeatures 返回的 float[] 顺序一一对应） */
-    public static final List<String> FEATURE_NAMES = List.of(
-            // 价格特征 (0-5)
-            "return_1", "return_3", "return_5", "return_10", "amplitude", "close_open_ratio",
-            // 成交量特征 (6-8)
-            "volume_ratio_5", "volume_change_1", "volume_change_3",
-            // MACD — TA4J (9-11)
+    /** 每个时间框架的 TA4J 指标特征名（22个） */
+    private static final List<String> TF_INDICATOR_NAMES = List.of(
             "macd_value", "macd_signal", "macd_histogram",
-            // 布林带 — TA4J (12-14)
             "bb_position", "bb_width", "price_vs_bb_mid",
-            // RSI — TA4J (15-16)
             "rsi_14", "rsi_7",
-            // ATR — TA4J 新增 (17-18)
             "atr_14", "atr_percent",
-            // ADX — TA4J 新增 (19)
             "adx_14",
-            // K线形态 (20-22)
-            "upper_shadow_ratio", "lower_shadow_ratio", "body_ratio",
-            // 移动均线 — TA4J (23-27)
             "sma5_slope", "sma20_slope", "price_vs_sma20", "ema12_vs_ema26", "sma5_vs_sma20",
-            // Stochastic KDJ — TA4J 新增 (28-29)
             "stoch_k", "stoch_d",
-            // OBV — TA4J 新增 (30-31)
-            "obv_slope_5", "obv_direction",
-            // CCI — TA4J 新增 (32)
+            "obv_slope_5",
             "cci_20",
-            // Williams %R — TA4J 新增 (33)
             "williams_r_14",
-            // 链上数据 (34-39)
-            "whale_volume", "nupl", "sopr", "exchange_net_flow", "exchange_inflow", "exchange_outflow"
+            "obv_direction"
     );
 
-    public static final int FEATURE_COUNT = FEATURE_NAMES.size();
+    /** 完整特征名称列表 */
+    public static final List<String> FEATURE_NAMES;
+    public static final int FEATURE_COUNT;
 
-    /** 训练所需的最小 K 线数 */
+    static {
+        List<String> names = new ArrayList<>();
+        // 1. 主时间框架(1h)价格+成交量+K线形态 (9个)
+        names.addAll(List.of(
+                "return_1", "return_3", "return_5", "return_10",
+                "amplitude", "close_open_ratio",
+                "volume_ratio_5", "volume_change_1", "volume_change_3"
+        ));
+        // 2. 三个时间框架的TA4J指标 (22*3=66个)
+        for (String tf : List.of("1h", "4h", "1d")) {
+            for (String ind : TF_INDICATOR_NAMES) {
+                names.add(tf + "_" + ind);
+            }
+        }
+        // 3. 链上数据 (6个)
+        names.addAll(List.of(
+                "whale_volume", "nupl", "sopr",
+                "exchange_net_flow", "exchange_inflow", "exchange_outflow"
+        ));
+        FEATURE_NAMES = Collections.unmodifiableList(names);
+        FEATURE_COUNT = FEATURE_NAMES.size(); // 9 + 66 + 6 = 81
+    }
+
+    /** 训练所需的最小 K 线数（主时间框架） */
     public static final int MIN_KLINES = 30;
 
     /**
-     * 从一组 K 线数据的最后一根位置提取特征向量。
+     * 多时间框架特征提取（训练和预测主入口）。
      *
-     * @param klines      按时间正序排列的 K 线（至少 30 根）
-     * @param onChainData 链上指标（可为空 map）
-     * @return float[FEATURE_COUNT]，或 null（数据不足时）
+     * @param klinesByTf  key=时间框架("1h","4h","1d"), value=按时间正序的K线列表
+     * @param onChainData 链上指标最新值
+     * @return float[FEATURE_COUNT]，数据不足返回 null
      */
-    public float[] extractFeatures(List<Kline> klines, Map<String, BigDecimal> onChainData) {
-        if (klines == null || klines.size() < MIN_KLINES) return null;
-
-        // 一次性通过 TA4J 计算所有指标
-        IndicatorSnapshot snap = ta4jService.calculateAll(klines);
-        if (snap == null) return null;
+    public float[] extractMultiTfFeatures(Map<String, List<Kline>> klinesByTf,
+                                           Map<String, BigDecimal> onChainData) {
+        List<Kline> klines1h = klinesByTf.get("1h");
+        if (klines1h == null || klines1h.size() < MIN_KLINES) return null;
 
         float[] features = new float[FEATURE_COUNT];
-        int last = klines.size() - 1;
+        int offset = 0;
 
-        // === 价格特征 ===
-        features[0] = (float) calcReturn(klines, last, 1);
-        features[1] = (float) calcReturn(klines, last, 3);
-        features[2] = (float) calcReturn(klines, last, 5);
-        features[3] = (float) calcReturn(klines, last, 10);
-        features[4] = (float) calcAmplitude(klines.get(last));
-        features[5] = (float) calcCloseOpenRatio(klines.get(last));
+        // === 1. 主时间框架价格+成交量特征 (9个) ===
+        int last = klines1h.size() - 1;
+        features[offset++] = (float) calcReturn(klines1h, last, 1);
+        features[offset++] = (float) calcReturn(klines1h, last, 3);
+        features[offset++] = (float) calcReturn(klines1h, last, 5);
+        features[offset++] = (float) calcReturn(klines1h, last, 10);
+        features[offset++] = (float) calcAmplitude(klines1h.get(last));
+        features[offset++] = (float) calcCloseOpenRatio(klines1h.get(last));
+        features[offset++] = (float) calcVolumeRatio(klines1h, last, 5);
+        features[offset++] = (float) calcVolumeChange(klines1h, last, 1);
+        features[offset++] = (float) calcVolumeChange(klines1h, last, 3);
 
-        // === 成交量特征 ===
-        features[6] = (float) calcVolumeRatio(klines, last, 5);
-        features[7] = (float) calcVolumeChange(klines, last, 1);
-        features[8] = (float) calcVolumeChange(klines, last, 3);
-
-        // === MACD (TA4J) ===
-        features[9] = (float) snap.macd;
-        features[10] = (float) snap.macdSignal;
-        features[11] = (float) snap.macdHistogram;
-
-        // === 布林带 (TA4J) ===
-        features[12] = (float) snap.bbPosition;
-        features[13] = (float) snap.bbWidth;
-        features[14] = snap.bbMiddle > 0
-                ? (float) ((snap.close - snap.bbMiddle) / snap.bbMiddle * 100) : 0f;
-
-        // === RSI (TA4J) ===
-        features[15] = (float) snap.rsi14;
-        features[16] = (float) snap.rsi7;
-
-        // === ATR (TA4J) — 波动率衡量 ===
-        features[17] = (float) snap.atr14;
-        features[18] = (float) snap.atrPercent;
-
-        // === ADX (TA4J) — 趋势强度 ===
-        features[19] = (float) snap.adx14;
-
-        // === K线形态 ===
-        Kline bar = klines.get(last);
-        double high = bar.getHigh().doubleValue();
-        double low = bar.getLow().doubleValue();
-        double open = bar.getOpen().doubleValue();
-        double close = bar.getClose().doubleValue();
-        double range = high - low;
-        if (range > 0) {
-            double bodyTop = Math.max(open, close);
-            double bodyBottom = Math.min(open, close);
-            features[20] = (float) ((high - bodyTop) / range);
-            features[21] = (float) ((bodyBottom - low) / range);
-            features[22] = (float) ((bodyTop - bodyBottom) / range);
+        // === 2. 三个时间框架的TA4J指标 (22*3=66个) ===
+        for (String tf : List.of("1h", "4h", "1d")) {
+            List<Kline> klines = klinesByTf.get(tf);
+            if (klines != null && klines.size() >= MIN_KLINES) {
+                offset = fillIndicatorFeatures(features, offset, klines);
+            } else {
+                // 数据不足，填0
+                offset += TF_INDICATOR_NAMES.size();
+            }
         }
 
-        // === 移动均线 (TA4J) ===
-        // SMA5 斜率: 用当前 SMA5 vs 前一根的近似
-        features[23] = snap.sma5 > 0
-                ? (float) ((snap.close - snap.sma5) / snap.sma5 * 100) : 0f;
-        // SMA20 斜率
-        features[24] = snap.sma20 > 0
-                ? (float) ((snap.sma10 - snap.sma20) / snap.sma20 * 100) : 0f;
-        // 价格偏离 SMA20
-        features[25] = snap.sma20 > 0
-                ? (float) ((snap.close - snap.sma20) / snap.sma20 * 100) : 0f;
-        // EMA12 vs EMA26（趋势方向）
-        features[26] = snap.ema26 > 0
-                ? (float) ((snap.ema12 - snap.ema26) / snap.ema26 * 100) : 0f;
-        // SMA5 vs SMA20（短期 vs 中期）
-        features[27] = snap.sma20 > 0
-                ? (float) ((snap.sma5 - snap.sma20) / snap.sma20 * 100) : 0f;
-
-        // === Stochastic KDJ (TA4J) ===
-        features[28] = (float) snap.stochK;
-        features[29] = (float) snap.stochD;
-
-        // === OBV (TA4J) ===
-        features[30] = (float) snap.obvSlope5;
-        features[31] = snap.obvSlope5 > 0 ? 1f : (snap.obvSlope5 < 0 ? -1f : 0f);
-
-        // === CCI (TA4J) ===
-        features[32] = (float) snap.cci20;
-
-        // === Williams %R (TA4J) ===
-        features[33] = (float) snap.williamsR14;
-
-        // === 链上数据 ===
+        // === 3. 链上数据 (6个) ===
         if (onChainData != null) {
-            features[34] = safeFloat(onChainData.get("whale_transfer_volume"));
-            features[35] = safeFloat(onChainData.get("nupl"));
-            features[36] = safeFloat(onChainData.get("sopr"));
-            features[37] = safeFloat(onChainData.get("exchange_net_flow"));
-            features[38] = safeFloat(onChainData.get("exchange_inflow"));
-            features[39] = safeFloat(onChainData.get("exchange_outflow"));
+            features[offset++] = safeFloat(onChainData.get("whale_transfer_volume"));
+            features[offset++] = safeFloat(onChainData.get("nupl"));
+            features[offset++] = safeFloat(onChainData.get("sopr"));
+            features[offset++] = safeFloat(onChainData.get("exchange_net_flow"));
+            features[offset++] = safeFloat(onChainData.get("exchange_inflow"));
+            features[offset++] = safeFloat(onChainData.get("exchange_outflow"));
         }
 
-        // NaN/Infinity 清洗：防止异常值导致 ML 训练失败
+        // NaN/Infinity 清洗
         for (int i = 0; i < features.length; i++) {
             if (Float.isNaN(features[i]) || Float.isInfinite(features[i])) {
                 features[i] = 0f;
@@ -184,20 +133,71 @@ public class FeatureEngineerService {
     }
 
     /**
+     * 兼容旧接口：单时间框架特征提取（策略用）。
+     */
+    public float[] extractFeatures(List<Kline> klines, Map<String, BigDecimal> onChainData) {
+        return extractMultiTfFeatures(Map.of("1h", klines), onChainData);
+    }
+
+    /**
+     * 填充单个时间框架的22个TA4J指标到features数组。
+     */
+    private int fillIndicatorFeatures(float[] features, int offset, List<Kline> klines) {
+        IndicatorSnapshot snap = ta4jService.calculateAll(klines);
+        if (snap == null) {
+            return offset + TF_INDICATOR_NAMES.size();
+        }
+
+        features[offset++] = (float) snap.macd;
+        features[offset++] = (float) snap.macdSignal;
+        features[offset++] = (float) snap.macdHistogram;
+
+        features[offset++] = (float) snap.bbPosition;
+        features[offset++] = (float) snap.bbWidth;
+        features[offset++] = snap.bbMiddle > 0
+                ? (float) ((snap.close - snap.bbMiddle) / snap.bbMiddle * 100) : 0f;
+
+        features[offset++] = (float) snap.rsi14;
+        features[offset++] = (float) snap.rsi7;
+
+        features[offset++] = (float) snap.atr14;
+        features[offset++] = (float) snap.atrPercent;
+
+        features[offset++] = (float) snap.adx14;
+
+        features[offset++] = snap.sma5 > 0
+                ? (float) ((snap.close - snap.sma5) / snap.sma5 * 100) : 0f;
+        features[offset++] = snap.sma20 > 0
+                ? (float) ((snap.sma10 - snap.sma20) / snap.sma20 * 100) : 0f;
+        features[offset++] = snap.sma20 > 0
+                ? (float) ((snap.close - snap.sma20) / snap.sma20 * 100) : 0f;
+        features[offset++] = snap.ema26 > 0
+                ? (float) ((snap.ema12 - snap.ema26) / snap.ema26 * 100) : 0f;
+        features[offset++] = snap.sma20 > 0
+                ? (float) ((snap.sma5 - snap.sma20) / snap.sma20 * 100) : 0f;
+
+        features[offset++] = (float) snap.stochK;
+        features[offset++] = (float) snap.stochD;
+
+        features[offset++] = (float) snap.obvSlope5;
+
+        features[offset++] = (float) snap.cci20;
+
+        features[offset++] = (float) snap.williamsR14;
+
+        features[offset++] = snap.obvSlope5 > 0 ? 1f : (snap.obvSlope5 < 0 ? -1f : 0f);
+
+        return offset;
+    }
+
+    // ====================== 标签生成 ======================
+
+    /**
      * 根据未来 N 根 K 线的加权收益生成标签。
-     *
-     * <p>改进点：旧版只看下一根K线（噪声大），新版看未来多根K线加权平均，
-     * 近期权重大、远期权重小（指数衰减），信号更稳定。</p>
-     *
-     * @param futureKlines 未来 N 根 K 线列表（按时间正序）
-     * @param currentClose 当前收盘价
-     * @param threshold    涨跌幅阈值（%）
-     * @return 0=跌, 1=横盘, 2=涨
      */
     public int generateLabel(List<Kline> futureKlines, double currentClose, double threshold) {
         if (futureKlines == null || futureKlines.isEmpty() || currentClose <= 0) return 1;
 
-        // 指数衰减加权：第1根权重=1.0, 第2根=0.7, 第3根=0.49, ...
         double decay = 0.7;
         double weightedReturn = 0;
         double totalWeight = 0;
@@ -211,15 +211,11 @@ public class FeatureEngineerService {
         }
 
         double avgReturn = totalWeight > 0 ? weightedReturn / totalWeight : 0;
-
-        if (avgReturn > threshold) return 2;  // 涨
-        if (avgReturn < -threshold) return 0; // 跌
-        return 1; // 横盘
+        if (avgReturn > threshold) return 2;
+        if (avgReturn < -threshold) return 0;
+        return 1;
     }
 
-    /**
-     * 兼容旧接口：单根 K 线标签（内部转为 list 调用）。
-     */
     public int generateLabel(Kline nextKline, double currentClose, double threshold) {
         return generateLabel(List.of(nextKline), currentClose, threshold);
     }
@@ -236,7 +232,7 @@ public class FeatureEngineerService {
         return map;
     }
 
-    // ====================== 价格/成交量基础计算 ======================
+    // ====================== 基础计算 ======================
 
     private double calcReturn(List<Kline> klines, int idx, int lookback) {
         int prev = idx - lookback;
@@ -259,12 +255,12 @@ public class FeatureEngineerService {
     }
 
     private double calcVolumeRatio(List<Kline> klines, int idx, int lookback) {
-        double current = klines.get(idx).getVolume().doubleValue();
+        double current = klines.get(idx).getVolume() != null ? klines.get(idx).getVolume().doubleValue() : 0;
         double sum = 0;
         int count = 0;
         for (int i = idx - lookback; i < idx; i++) {
             if (i >= 0) {
-                sum += klines.get(i).getVolume().doubleValue();
+                sum += klines.get(i).getVolume() != null ? klines.get(i).getVolume().doubleValue() : 0;
                 count++;
             }
         }
@@ -275,8 +271,8 @@ public class FeatureEngineerService {
     private double calcVolumeChange(List<Kline> klines, int idx, int lookback) {
         int prev = idx - lookback;
         if (prev < 0) return 0;
-        double v0 = klines.get(prev).getVolume().doubleValue();
-        double v1 = klines.get(idx).getVolume().doubleValue();
+        double v0 = klines.get(prev).getVolume() != null ? klines.get(prev).getVolume().doubleValue() : 0;
+        double v1 = klines.get(idx).getVolume() != null ? klines.get(idx).getVolume().doubleValue() : 0;
         return v0 > 0 ? (v1 - v0) / v0 * 100 : 0;
     }
 
