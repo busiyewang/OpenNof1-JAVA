@@ -37,7 +37,7 @@ public class Signal {
     @Column(name = "confidence")
     private double confidence;
 
-    @Column(length = 50)
+    @Column(length = 100)
     private String strategyName;
 
     @Column(length = 500)
