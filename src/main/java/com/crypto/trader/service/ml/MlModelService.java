@@ -9,6 +9,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import smile.classification.GradientTreeBoost;
+import smile.data.DataFrame;
+import smile.data.Tuple;
+import smile.data.formula.Formula;
+import smile.data.type.DataTypes;
+import smile.data.type.StructField;
+import smile.data.type.StructType;
+import smile.data.vector.IntVector;
 
 import java.io.*;
 import java.math.BigDecimal;
@@ -24,9 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * ML 模型管理服务 — 基于 Smile GradientTreeBoost（纯 Java，无 native 依赖）。
  *
  * <p>训练数据来源：数据库中的历史 K 线 + 链上数据。
- * 标签生成：根据下一根 K 线的涨跌幅分为 3 类（跌/横盘/涨）。</p>
- *
- * <p>模型按 symbol+interval 维度管理，序列化到 {@code crypto.ml.model-dir} 目录。</p>
+ * 标签生成：根据未来 N 根 K 线的加权收益分为 3 类（跌/横盘/涨）。</p>
  */
 @Service
 @Slf4j
@@ -37,8 +42,11 @@ public class MlModelService {
     private final KlineRepository klineRepository;
     private final OnChainMetricRepository onChainRepository;
 
-    /** 内存中缓存已加载的模型，key = "symbol:interval" */
+    /** 内存中缓存已加载的模型 */
     private final ConcurrentHashMap<String, GradientTreeBoost> modelCache = new ConcurrentHashMap<>();
+
+    /** 缓存训练时的 schema（predict 构建 Tuple 需要） */
+    private final ConcurrentHashMap<String, StructType> schemaCache = new ConcurrentHashMap<>();
 
     @Value("${crypto.ml.model-dir:./ml-models}")
     private String modelDir;
@@ -49,24 +57,16 @@ public class MlModelService {
     @Value("${crypto.ml.train-months:6}")
     private int trainMonths;
 
-    /** 链上指标名列表 */
     private static final List<String> ONCHAIN_METRICS = List.of(
             "whale_transfer_volume", "nupl", "sopr",
             "exchange_net_flow", "exchange_inflow", "exchange_outflow"
     );
 
-    /** 类别数 */
     private static final int NUM_CLASSES = 3;
+    private static final Formula FORMULA = Formula.lhs("label");
 
     // ======================== 训练 ========================
 
-    /**
-     * 使用历史数据训练 GradientTreeBoost 模型。
-     *
-     * @param symbol   交易对
-     * @param interval K 线周期（如 1h）
-     * @return 训练报告信息
-     */
     public String train(String symbol, String interval) {
         log.info("[ML训练] 开始训练 {} {} 模型，回溯 {} 个月", symbol, interval, trainMonths);
         long t0 = System.currentTimeMillis();
@@ -88,16 +88,14 @@ public class MlModelService {
         List<double[]> featureList = new ArrayList<>();
         List<Integer> labelList = new ArrayList<>();
         int labelLookAhead = 5;
-
         int windowSize = FeatureEngineerService.MIN_KLINES;
-        // 链上数据缓存：每10根K线刷新一次（链上数据是日级别，不需要每根都查）
+
         Map<String, BigDecimal> onChainMap = new HashMap<>();
         Instant lastOnChainRefresh = Instant.MIN;
 
         for (int i = windowSize; i < allKlines.size() - labelLookAhead; i++) {
             Instant barTime = allKlines.get(i).getTimestamp();
 
-            // 每隔10根K线或跨天时刷新链上数据快照
             if (Duration.between(lastOnChainRefresh, barTime).toHours() >= 24) {
                 onChainMap.clear();
                 for (String metric : ONCHAIN_METRICS) {
@@ -128,32 +126,35 @@ public class MlModelService {
 
         log.info("[ML训练] {} {} 生成 {} 个训练样本", symbol, interval, featureList.size());
 
-        // 4. 转换为 Smile 要求的数据格式并训练
+        // 4. 构建 DataFrame 并训练
         try {
             int numSamples = featureList.size();
-
             double[][] x = featureList.toArray(new double[0][]);
             int[] y = labelList.stream().mapToInt(Integer::intValue).toArray();
 
-            // 分割训练集/验证集 (80/20)
+            // 80/20 分割
             int trainSize = (int) (numSamples * 0.8);
             double[][] trainX = Arrays.copyOf(x, trainSize);
             int[] trainY = Arrays.copyOf(y, trainSize);
             double[][] valX = Arrays.copyOfRange(x, trainSize, numSamples);
             int[] valY = Arrays.copyOfRange(y, trainSize, numSamples);
 
-            // Smile GradientTreeBoost 参数:
-            // ntrees=200, maxDepth=6, maxNodes=20, nodeSize=3, shrinkage=0.1, subsample=0.8
-            GradientTreeBoost model = GradientTreeBoost.fit(trainX, trainY,
-                    200,    // ntrees
-                    6,      // maxDepth
-                    20,     // maxNodes
-                    3,      // nodeSize (min samples per leaf)
-                    0.1,    // shrinkage (learning rate)
-                    0.8     // subsample
-            );
+            // 构建 Smile DataFrame
+            String[] featureNames = FeatureEngineerService.FEATURE_NAMES.toArray(new String[0]);
+            DataFrame trainDf = DataFrame.of(trainX, featureNames).merge(IntVector.of("label", trainY));
 
-            // 5. 保存模型（Java 序列化）
+            // 训练参数
+            Properties props = new Properties();
+            props.setProperty("smile.gbt.trees", "200");
+            props.setProperty("smile.gbt.max_depth", "6");
+            props.setProperty("smile.gbt.max_nodes", "20");
+            props.setProperty("smile.gbt.node_size", "3");
+            props.setProperty("smile.gbt.shrinkage", "0.1");
+            props.setProperty("smile.gbt.sample_rate", "0.8");
+
+            GradientTreeBoost model = GradientTreeBoost.fit(FORMULA, trainDf, props);
+
+            // 保存模型 + schema
             String modelKey = modelKey(symbol, interval);
             Path modelPath = Path.of(modelDir, modelKey + ".model");
             Files.createDirectories(modelPath.getParent());
@@ -162,19 +163,29 @@ public class MlModelService {
                 oos.writeObject(model);
             }
 
+            // 缓存特征 schema（预测时构建 Tuple 需要）
+            StructType featureSchema = buildFeatureSchema(featureNames);
+            schemaCache.put(modelKey, featureSchema);
             modelCache.put(modelKey, model);
 
-            // 6. 计算验证集准确率
+            // 保存 schema
+            Path schemaPath = Path.of(modelDir, modelKey + ".schema");
+            try (ObjectOutputStream oos = new ObjectOutputStream(
+                    new BufferedOutputStream(new FileOutputStream(schemaPath.toFile())))) {
+                oos.writeObject(featureSchema);
+            }
+
+            // 计算验证集准确率
             int correct = 0;
             for (int i = 0; i < valX.length; i++) {
-                int predicted = model.predict(valX[i]);
+                Tuple tuple = Tuple.of(valX[i], featureSchema);
+                int predicted = model.predict(tuple);
                 if (predicted == valY[i]) correct++;
             }
             double accuracy = valX.length > 0 ? (double) correct / valX.length * 100 : 0;
 
             long elapsed = System.currentTimeMillis() - t0;
 
-            // 统计类别分布
             int[] classCounts = new int[NUM_CLASSES];
             for (int l : labelList) classCounts[l]++;
 
@@ -195,20 +206,18 @@ public class MlModelService {
 
     // ======================== 预测 ========================
 
-    /**
-     * 使用训练好的模型进行预测。
-     *
-     * @param symbol      交易对
-     * @param interval    K 线周期
-     * @param klines      最新 K 线（按时间正序，至少 30 根）
-     * @param onChainData 链上指标最新值
-     * @return 预测结果，或 null（模型未就绪时）
-     */
     public MlPrediction predict(String symbol, String interval,
                                  List<Kline> klines, Map<String, BigDecimal> onChainData) {
+        String key = modelKey(symbol, interval);
         GradientTreeBoost model = getModel(symbol, interval);
         if (model == null) {
             log.debug("[ML预测] {} {} 模型未加载，跳过预测", symbol, interval);
+            return null;
+        }
+
+        StructType schema = schemaCache.get(key);
+        if (schema == null) {
+            log.warn("[ML预测] {} {} schema 未加载", symbol, interval);
             return null;
         }
 
@@ -219,11 +228,10 @@ public class MlModelService {
         }
 
         try {
-            double[] sample = toDouble(features);
+            Tuple tuple = Tuple.of(toDouble(features), schema);
             double[] posteriori = new double[NUM_CLASSES];
-            int predicted = model.predict(sample, posteriori);
+            model.predict(tuple, posteriori);
 
-            // 转为 float[] 兼容 MlPrediction
             float[] probs = new float[NUM_CLASSES];
             for (int i = 0; i < NUM_CLASSES; i++) {
                 probs[i] = (float) posteriori[i];
@@ -244,11 +252,9 @@ public class MlModelService {
         }
     }
 
-    /**
-     * 检查模型是否可用。
-     */
     public boolean isModelReady(String symbol, String interval) {
-        return getModel(symbol, interval) != null;
+        String key = modelKey(symbol, interval);
+        return getModel(symbol, interval) != null && schemaCache.containsKey(key);
     }
 
     // ======================== 内部方法 ========================
@@ -258,12 +264,19 @@ public class MlModelService {
         GradientTreeBoost model = modelCache.get(key);
         if (model != null) return model;
 
-        // 尝试从文件加载
         Path modelPath = Path.of(modelDir, key + ".model");
-        if (Files.exists(modelPath)) {
-            try (ObjectInputStream ois = new ObjectInputStream(
-                    new BufferedInputStream(new FileInputStream(modelPath.toFile())))) {
-                model = (GradientTreeBoost) ois.readObject();
+        Path schemaPath = Path.of(modelDir, key + ".schema");
+        if (Files.exists(modelPath) && Files.exists(schemaPath)) {
+            try {
+                try (ObjectInputStream ois = new ObjectInputStream(
+                        new BufferedInputStream(new FileInputStream(modelPath.toFile())))) {
+                    model = (GradientTreeBoost) ois.readObject();
+                }
+                try (ObjectInputStream ois = new ObjectInputStream(
+                        new BufferedInputStream(new FileInputStream(schemaPath.toFile())))) {
+                    StructType schema = (StructType) ois.readObject();
+                    schemaCache.put(key, schema);
+                }
                 modelCache.put(key, model);
                 log.info("[ML] 从文件加载模型: {}", modelPath);
                 return model;
@@ -274,11 +287,18 @@ public class MlModelService {
         return null;
     }
 
+    private StructType buildFeatureSchema(String[] featureNames) {
+        StructField[] fields = new StructField[featureNames.length];
+        for (int i = 0; i < featureNames.length; i++) {
+            fields[i] = new StructField(featureNames[i], DataTypes.DoubleType);
+        }
+        return new StructType(fields);
+    }
+
     private String modelKey(String symbol, String interval) {
         return symbol.toLowerCase() + "_" + interval;
     }
 
-    /** float[] → double[] 转换（Smile 使用 double）*/
     private double[] toDouble(float[] arr) {
         double[] result = new double[arr.length];
         for (int i = 0; i < arr.length; i++) {
