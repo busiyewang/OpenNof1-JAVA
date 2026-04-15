@@ -48,7 +48,13 @@ public class PromptBuilder {
         sb.append("- 如果数据不足以得出结论，降低置信度而不是强行给出方向\n");
         sb.append("- 支撑位和阻力位必须基于实际的技术分析结果（如中枢上下沿、布林带），不要凭空推测\n");
         sb.append("- 明确区分短期（1-3天）和中期（1-2周）的展望\n");
-        sb.append("- 风险评估要具体，列出可量化的风险因子\n\n");
+        sb.append("- 风险评估要具体，列出可量化的风险因子\n");
+        sb.append("- 重点关注以下指标组合信号：\n");
+        sb.append("  * RSI+KDJ 双重超买超卖确认\n");
+        sb.append("  * ADX 趋势强度判断（是否适合趋势跟踪策略）\n");
+        sb.append("  * ATR 波动率评估（用于止损止盈距离计算）\n");
+        sb.append("  * OBV 量价配合度（量价背离=趋势不健康）\n");
+        sb.append("  * CCI+WilliamsR 作为辅助超买超卖确认\n\n");
 
         // ========== 2. 市场数据 ==========
         sb.append("=== ").append(symbol).append(" 市场分析数据 ===\n\n");
@@ -70,6 +76,31 @@ public class PromptBuilder {
             sb.append("布林带: upper=").append(formatDouble(tf.getBollingerUpper()))
               .append(", middle=").append(formatDouble(tf.getBollingerMiddle()))
               .append(", lower=").append(formatDouble(tf.getBollingerLower())).append("\n");
+
+            // TA4J 新增指标
+            sb.append("RSI: RSI14=").append(formatDouble(tf.getRsi14()))
+              .append(", RSI7=").append(formatDouble(tf.getRsi7()))
+              .append("  (>70超买, <30超卖)\n");
+
+            sb.append("ATR: ATR14=").append(formatDouble(tf.getAtr14()))
+              .append(", 波动率=").append(formatPercent(tf.getAtrPercent()))
+              .append("  (衡量波动幅度)\n");
+
+            sb.append("ADX: ").append(formatDouble(tf.getAdx14()))
+              .append("  (<20横盘, 20-40趋势形成, >40强趋势)\n");
+
+            sb.append("KDJ: K=").append(formatDouble(tf.getStochK()))
+              .append(", D=").append(formatDouble(tf.getStochD()))
+              .append("  (>80超买, <20超卖, K上穿D=金叉)\n");
+
+            sb.append("CCI: ").append(formatDouble(tf.getCci20()))
+              .append("  (>100超买, <-100超卖)\n");
+
+            sb.append("OBV趋势: ").append(formatPercent(tf.getObvSlope5()))
+              .append("  (量价背离=趋势可能反转)\n");
+
+            sb.append("WilliamsR: ").append(formatDouble(tf.getWilliamsR14()))
+              .append("  (>-20超买, <-80超卖)\n");
         }
 
         // ========== 3. 策略引擎结论 ==========

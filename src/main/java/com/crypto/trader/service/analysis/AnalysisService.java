@@ -13,6 +13,8 @@ import com.crypto.trader.repository.OnChainMetricRepository;
 import com.crypto.trader.service.indicator.BollingerBandsCalculator;
 import com.crypto.trader.service.indicator.ChanCalculator;
 import com.crypto.trader.service.indicator.MacdCalculator;
+import com.crypto.trader.service.indicator.Ta4jIndicatorService;
+import com.crypto.trader.service.indicator.Ta4jIndicatorService.IndicatorSnapshot;
 import com.crypto.trader.service.indicator.chan.ChanResult;
 import com.crypto.trader.service.ml.FeatureEngineerService;
 import com.crypto.trader.service.ml.MlModelService;
@@ -46,6 +48,8 @@ public class AnalysisService {
     private final MacdCalculator macdCalculator;
 
     private final BollingerBandsCalculator bollingerCalculator;
+
+    private final Ta4jIndicatorService ta4jService;
 
     private final DeepSeekClient deepSeekClient;
 
@@ -201,7 +205,7 @@ public class AnalysisService {
         return report;
     }
 
-    /** 计算单个时间框架的技术指标 */
+    /** 计算单个时间框架的技术指标（使用 TA4J 统一计算） */
     private TimeframeAnalysis buildTimeframeAnalysis(String timeframe, List<Kline> klines) {
         Kline latest = klines.get(klines.size() - 1);
         Kline earliest = klines.get(0);
@@ -221,16 +225,28 @@ public class AnalysisService {
                 .volume(latestVolume)
                 .volumeChangePercent(volumeChange);
 
-        // MACD
-        MacdCalculator.MacdValues macd = macdCalculator.calculate(klines);
-        if (macd != null) {
-            builder.macdValue(macd.macd).macdSignal(macd.signal).macdHistogram(macd.histogram);
-        }
-
-        // Bollinger Bands
-        BollingerBandsCalculator.BollingerValues bb = bollingerCalculator.calculate(klines);
-        if (bb != null) {
-            builder.bollingerUpper(bb.upper).bollingerMiddle(bb.middle).bollingerLower(bb.lower);
+        // 使用 TA4J 一次性计算全量指标
+        IndicatorSnapshot snap = ta4jService.calculateAll(klines);
+        if (snap != null) {
+            builder.macdValue(snap.macd).macdSignal(snap.macdSignal).macdHistogram(snap.macdHistogram)
+                   .bollingerUpper(snap.bbUpper).bollingerMiddle(snap.bbMiddle).bollingerLower(snap.bbLower)
+                   .rsi14(snap.rsi14).rsi7(snap.rsi7)
+                   .atr14(snap.atr14).atrPercent(snap.atrPercent)
+                   .adx14(snap.adx14)
+                   .stochK(snap.stochK).stochD(snap.stochD)
+                   .obvSlope5(snap.obvSlope5)
+                   .cci20(snap.cci20)
+                   .williamsR14(snap.williamsR14);
+        } else {
+            // 降级: 用旧的单独 Calculator（数据较少时仍可算 MACD/BB）
+            MacdCalculator.MacdValues macd = macdCalculator.calculate(klines);
+            if (macd != null) {
+                builder.macdValue(macd.macd).macdSignal(macd.signal).macdHistogram(macd.histogram);
+            }
+            BollingerBandsCalculator.BollingerValues bb = bollingerCalculator.calculate(klines);
+            if (bb != null) {
+                builder.bollingerUpper(bb.upper).bollingerMiddle(bb.middle).bollingerLower(bb.lower);
+            }
         }
 
         return builder.build();

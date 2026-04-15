@@ -90,6 +90,14 @@ crypto:
     weekly-cron: "0 0 9 ? * MON"   # 每周分析时间（默认周一早9点）
     timezone: Asia/Shanghai
 
+  # ========== XGBoost ML 模型 ==========
+  ml:
+    model-dir: ${ML_MODEL_DIR:./ml-models}  # 模型文件存储目录
+    label-threshold: 0.3                     # 涨跌幅阈值(%)，超过为涨/跌，否则横盘
+    train-months: 6                          # 训练数据回溯月数
+    train-interval: 1h                       # 训练用 K 线周期
+    train-cron: "0 0 3 * * ?"               # 每日凌晨3点自动重训练
+
   # ========== 消息通知调度 ==========
   summary:
     morning-cron: "0 0 9 * * ?"    # 早间通知（默认早9点）

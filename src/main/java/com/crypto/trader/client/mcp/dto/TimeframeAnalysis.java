@@ -22,4 +22,28 @@ public class TimeframeAnalysis {
     private double bollingerUpper;
     private double bollingerMiddle;
     private double bollingerLower;
+
+    // RSI (TA4J 新增)
+    private double rsi14;
+    private double rsi7;
+
+    // ATR (TA4J 新增)
+    private double atr14;
+    private double atrPercent;
+
+    // ADX 趋势强度 (TA4J 新增)
+    private double adx14;
+
+    // Stochastic KDJ (TA4J 新增)
+    private double stochK;
+    private double stochD;
+
+    // OBV (TA4J 新增)
+    private double obvSlope5;
+
+    // CCI (TA4J 新增)
+    private double cci20;
+
+    // Williams %R (TA4J 新增)
+    private double williamsR14;
 }
