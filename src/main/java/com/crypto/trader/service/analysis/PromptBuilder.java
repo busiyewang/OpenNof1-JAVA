@@ -266,7 +266,7 @@ public class PromptBuilder {
         if (prediction == null) return;
 
         sb.append("\n== XGBoost 专用预测模型结果 ==\n");
-        sb.append("（基于28维量化特征训练的机器学习模型，非LLM推测）\n\n");
+        sb.append("（基于40维量化特征训练的机器学习模型，非LLM推测）\n\n");
         sb.append("预测方向: ").append(prediction.getDirection()).append("\n");
         sb.append("模型置信度: ").append(String.format("%.1f%%", prediction.getConfidence() * 100)).append("\n");
 

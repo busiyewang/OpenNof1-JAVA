@@ -17,7 +17,7 @@ import java.util.List;
  * 缠论核心计算器。
  *
  * <p>计算流程：K线包含处理 → 分型识别（含强弱） → 笔构建 → 线段构建（特征序列）
- * → 中枢识别 → 走势类型判断 → 背驰判断（MACD面积+斜率+幅度三重验证） → 买卖点生成</p>
+ * → 中枢识别 → 走势类型判断 → 背驰判断（MACD面积+斜率+幅度+成交量 四重验证） → 买卖点生成</p>
  */
 @Component
 @Slf4j
@@ -40,8 +40,9 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
 
         ChanResult result = new ChanResult();
 
-        // 0. 计算 MACD（用于背驰判断）
+        // 0. 计算 MACD（用于背驰判断）+ 提取成交量数组
         double[] macdHistogram = calculateMacdHistogram(klines);
+        double[] volumes = extractVolumes(klines);
 
         // 1. K线包含处理
         List<BigDecimalPair> merged = mergeKlines(klines);
@@ -78,9 +79,9 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
         TrendType trendType = classifyTrend(zhongshuList);
         result.setTrendType(trendType);
 
-        // 7. 背驰判断 + 买卖点识别
+        // 7. 背驰判断 + 买卖点识别（四重验证：幅度+MACD+斜率+成交量）
         DivergenceType divergenceType = DivergenceType.NONE;
-        List<ChanSignalPoint> signalPoints = findSignalPoints(biList, zhongshuList, klines, macdHistogram, trendType);
+        List<ChanSignalPoint> signalPoints = findSignalPoints(biList, zhongshuList, klines, macdHistogram, volumes, trendType);
         result.setSignalPoints(signalPoints);
 
         // 从买卖点中提取背驰类型
@@ -150,6 +151,42 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
             area += Math.abs(histogram[i]);
         }
         return area;
+    }
+
+    /**
+     * 提取 K 线成交量数组。
+     */
+    private double[] extractVolumes(List<Kline> klines) {
+        double[] volumes = new double[klines.size()];
+        for (int i = 0; i < klines.size(); i++) {
+            volumes[i] = klines.get(i).getVolume() != null
+                    ? klines.get(i).getVolume().doubleValue() : 0;
+        }
+        return volumes;
+    }
+
+    /**
+     * 计算一段K线范围内的累计成交量。
+     */
+    private double volumeSum(double[] volumes, int startIdx, int endIdx) {
+        double sum = 0;
+        int from = Math.max(0, Math.min(startIdx, endIdx));
+        int to = Math.min(volumes.length - 1, Math.max(startIdx, endIdx));
+        for (int i = from; i <= to; i++) {
+            sum += volumes[i];
+        }
+        return sum;
+    }
+
+    /**
+     * 计算一段K线范围内的平均每根成交量。
+     */
+    private double volumeAvg(double[] volumes, int startIdx, int endIdx) {
+        int from = Math.max(0, Math.min(startIdx, endIdx));
+        int to = Math.min(volumes.length - 1, Math.max(startIdx, endIdx));
+        int count = to - from + 1;
+        if (count <= 0) return 0;
+        return volumeSum(volumes, startIdx, endIdx) / count;
     }
 
     // =========================================================================
@@ -538,30 +575,32 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
                                                     List<ChanZhongshu> zhongshuList,
                                                     List<Kline> klines,
                                                     double[] macdHistogram,
+                                                    double[] volumes,
                                                     TrendType trendType) {
         List<ChanSignalPoint> points = new ArrayList<>();
         if (biList.size() < 3) return points;
 
-        // 第一类买卖点：背驰（三重验证：价格幅度 + MACD面积 + 斜率）
-        findFirstTypePoints(biList, zhongshuList, klines, macdHistogram, trendType, points);
+        // 第一类买卖点：背驰（四重验证：价格幅度 + MACD面积 + 斜率 + 成交量）
+        findFirstTypePoints(biList, zhongshuList, klines, macdHistogram, volumes, trendType, points);
 
         // 第二类买卖点：回调不破
         findSecondTypePoints(biList, points);
 
-        // 第三类买卖点：中枢突破回踩
-        findThirdTypePoints(biList, zhongshuList, points);
+        // 第三类买卖点：中枢突破回踩（成交量确认突破有效性）
+        findThirdTypePoints(biList, zhongshuList, volumes, points);
 
         return points;
     }
 
     /**
-     * 第一类买卖点：三重背驰验证。
+     * 第一类买卖点：四重背驰验证。
      *
      * <p>验证条件：</p>
      * <ol>
      *   <li>价格幅度：最后一笔幅度 < 前同向笔幅度</li>
      *   <li>MACD面积：最后一笔MACD柱状图面积 < 前同向笔面积</li>
      *   <li>斜率：最后一笔斜率(幅度/K线数) < 前同向笔斜率</li>
+     *   <li>成交量：最后一笔平均成交量 < 前同向笔平均成交量（量价背离）</li>
      * </ol>
      *
      * <p>额外要求：两段走势之间必须经过至少一个中枢。</p>
@@ -571,10 +610,12 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
      *   <li>趋势背驰(≥2个中枢) + 强分型：0.90-0.95</li>
      *   <li>趋势背驰 + 弱分型：0.80-0.85</li>
      *   <li>盘整背驰(1个中枢)：0.60-0.70</li>
+     *   <li>成交量背驰加分：+0.03</li>
      * </ul>
      */
     private void findFirstTypePoints(List<ChanBi> biList, List<ChanZhongshu> zhongshuList,
                                       List<Kline> klines, double[] macdHistogram,
+                                      double[] volumes,
                                       TrendType trendType, List<ChanSignalPoint> points) {
         if (biList.size() < 5 || zhongshuList.isEmpty()) return;
 
@@ -602,7 +643,7 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
         // 如果两笔之间没有中枢但整体有中枢，也允许（笔可能在中枢内部）
         if (!hasZhongshuBetween && zhongshuList.size() < 1) return;
 
-        // --- 三重背驰验证 ---
+        // --- 四重背驰验证 ---
         // 1) 价格幅度
         BigDecimal lastAmplitude = lastBi.getEndPrice().subtract(lastBi.getStartPrice()).abs();
         BigDecimal prevAmplitude = prevSameDir.getEndPrice().subtract(prevSameDir.getStartPrice()).abs();
@@ -622,12 +663,20 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
                 ? prevAmplitude.doubleValue() / prevSameDir.getLength() : 0;
         boolean slopeDivergence = lastSlope < prevSlope;
 
-        // 至少满足两个条件才认定背驰
-        int divergenceCount = (amplitudeDivergence ? 1 : 0)
+        // 4) 成交量背驰（平均成交量萎缩 = 推动力不足）
+        double lastVolAvg = volumeAvg(volumes,
+                lastBi.getStartFractal().getIndex(), lastBi.getEndFractal().getIndex());
+        double prevVolAvg = volumeAvg(volumes,
+                prevSameDir.getStartFractal().getIndex(), prevSameDir.getEndFractal().getIndex());
+        boolean volumeDivergence = prevVolAvg > 0 && lastVolAvg < prevVolAvg;
+
+        // 前三维至少满足两个 + 成交量作为独立加分项
+        int coreCount = (amplitudeDivergence ? 1 : 0)
                 + (macdDivergence ? 1 : 0)
                 + (slopeDivergence ? 1 : 0);
+        int totalCount = coreCount + (volumeDivergence ? 1 : 0);
 
-        if (divergenceCount < 2) return;
+        if (coreCount < 2) return;
 
         // 区分趋势背驰 vs 盘整背驰
         boolean isTrendDivergence = (trendType == TrendType.TREND_UP || trendType == TrendType.TREND_DOWN)
@@ -641,37 +690,34 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
                 ? endFractal.getStrength() : ChanFractal.Strength.WEAK;
 
         // 计算置信度
-        double confidence = calculateFirstTypeConfidence(isTrendDivergence, strength, divergenceCount);
+        double confidence = calculateFirstTypeConfidence(isTrendDivergence, strength, coreCount, volumeDivergence);
 
-        if (lastBi.getDirection() == ChanBi.Direction.DOWN) {
-            ChanSignalPoint bp = new ChanSignalPoint();
-            bp.setPointType(ChanSignalPoint.PointType.BUY_1);
-            bp.setPrice(lastBi.getEndPrice());
-            bp.setTimestamp(lastBi.getEndTime());
-            bp.setConfidence(confidence);
-            bp.setDivergenceType(divType);
-            bp.setFractalStrength(strength);
-            bp.setDescription(String.format("一买[%s|%s分型]：幅度%.2f/%.2f MACD面积%.1f/%.1f 斜率%.4f/%.4f (%d/3验证通过)",
-                    isTrendDivergence ? "趋势背驰" : "盘整背驰",
-                    strength == ChanFractal.Strength.STRONG ? "强" : "弱",
-                    lastAmplitude, prevAmplitude, lastMacdArea, prevMacdArea,
-                    lastSlope, prevSlope, divergenceCount));
-            points.add(bp);
-        } else {
-            ChanSignalPoint sp = new ChanSignalPoint();
-            sp.setPointType(ChanSignalPoint.PointType.SELL_1);
-            sp.setPrice(lastBi.getEndPrice());
-            sp.setTimestamp(lastBi.getEndTime());
-            sp.setConfidence(confidence);
-            sp.setDivergenceType(divType);
-            sp.setFractalStrength(strength);
-            sp.setDescription(String.format("一卖[%s|%s分型]：幅度%.2f/%.2f MACD面积%.1f/%.1f 斜率%.4f/%.4f (%d/3验证通过)",
-                    isTrendDivergence ? "趋势背驰" : "盘整背驰",
-                    strength == ChanFractal.Strength.STRONG ? "强" : "弱",
-                    lastAmplitude, prevAmplitude, lastMacdArea, prevMacdArea,
-                    lastSlope, prevSlope, divergenceCount));
-            points.add(sp);
-        }
+        // 成交量变化比率
+        double volChangeRatio = prevVolAvg > 0 ? (lastVolAvg - prevVolAvg) / prevVolAvg * 100 : 0;
+
+        String desc = String.format("一%s[%s|%s分型]：幅度%.2f/%.2f MACD面积%.1f/%.1f 斜率%.4f/%.4f 量比%.1f%% (%d/4验证通过%s)",
+                lastBi.getDirection() == ChanBi.Direction.DOWN ? "买" : "卖",
+                isTrendDivergence ? "趋势背驰" : "盘整背驰",
+                strength == ChanFractal.Strength.STRONG ? "强" : "弱",
+                lastAmplitude, prevAmplitude, lastMacdArea, prevMacdArea,
+                lastSlope, prevSlope, volChangeRatio, totalCount,
+                volumeDivergence ? ",量价背离" : "");
+
+        ChanSignalPoint point = new ChanSignalPoint();
+        point.setPointType(lastBi.getDirection() == ChanBi.Direction.DOWN
+                ? ChanSignalPoint.PointType.BUY_1 : ChanSignalPoint.PointType.SELL_1);
+        point.setPrice(lastBi.getEndPrice());
+        point.setTimestamp(lastBi.getEndTime());
+        point.setConfidence(confidence);
+        point.setDivergenceType(divType);
+        point.setFractalStrength(strength);
+        point.setDescription(desc);
+        points.add(point);
+
+        log.info("[缠论] {} 信号: {} | 成交量背驰={} (当前笔均量={}, 前笔均量={}, 变化={}%)",
+                point.getPointType(), desc, volumeDivergence,
+                String.format("%.0f", lastVolAvg), String.format("%.0f", prevVolAvg),
+                String.format("%.1f", volChangeRatio));
     }
 
     /**
@@ -679,7 +725,8 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
      */
     private double calculateFirstTypeConfidence(boolean isTrendDivergence,
                                                  ChanFractal.Strength strength,
-                                                 int divergenceCount) {
+                                                 int coreCount,
+                                                 boolean volumeDivergence) {
         double base;
         if (isTrendDivergence) {
             base = strength == ChanFractal.Strength.STRONG ? 0.90 : 0.80;
@@ -687,8 +734,10 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
             // 盘整背驰，置信度较低
             base = strength == ChanFractal.Strength.STRONG ? 0.70 : 0.60;
         }
-        // 三重验证全部通过额外加分
-        if (divergenceCount == 3) base += 0.05;
+        // 核心三维全部通过加分
+        if (coreCount == 3) base += 0.03;
+        // 成交量背驰加分（量价背离是强烈的背驰信号）
+        if (volumeDivergence) base += 0.03;
         return Math.min(base, 0.95);
     }
 
@@ -752,18 +801,40 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
     }
 
     /**
-     * 第三类买卖点：中枢突破回踩确认。
+     * 第三类买卖点：中枢突破回踩确认 + 成交量验证。
      *
      * <p>三买：向上突破中枢ZG后，回踩低点仍在ZG之上</p>
      * <p>三卖：向下跌破中枢ZD后，反弹高点仍在ZD之下</p>
+     *
+     * <p>成交量验证：</p>
+     * <ul>
+     *   <li>突破笔(prevBi)成交量放大(高于中枢内平均) → 突破有效，置信度+0.05</li>
+     *   <li>回踩笔(lastBi)成交量萎缩 → 回踩只是洗盘，置信度+0.03</li>
+     *   <li>突破笔缩量 → 突破可能是假突破，置信度-0.05</li>
+     * </ul>
      */
     private void findThirdTypePoints(List<ChanBi> biList, List<ChanZhongshu> zhongshuList,
-                                      List<ChanSignalPoint> points) {
+                                      double[] volumes, List<ChanSignalPoint> points) {
         if (zhongshuList.isEmpty() || biList.size() < 2) return;
 
         ChanZhongshu lastZh = zhongshuList.get(zhongshuList.size() - 1);
         ChanBi lastBi = biList.get(biList.size() - 1);
         ChanBi prevBi = biList.get(biList.size() - 2);
+
+        // 计算中枢内平均成交量（作为基准）
+        double zhVolAvg = 0;
+        if (!lastZh.getBiList().isEmpty()) {
+            ChanBi firstZhBi = lastZh.getBiList().get(0);
+            ChanBi lastZhBi = lastZh.getBiList().get(lastZh.getBiList().size() - 1);
+            zhVolAvg = volumeAvg(volumes,
+                    firstZhBi.getStartFractal().getIndex(), lastZhBi.getEndFractal().getIndex());
+        }
+
+        // 突破笔和回踩笔的平均成交量
+        double breakoutVolAvg = volumeAvg(volumes,
+                prevBi.getStartFractal().getIndex(), prevBi.getEndFractal().getIndex());
+        double pullbackVolAvg = volumeAvg(volumes,
+                lastBi.getStartFractal().getIndex(), lastBi.getEndFractal().getIndex());
 
         // 三买
         if (prevBi.getDirection() == ChanBi.Direction.UP
@@ -771,12 +842,24 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
                 && lastBi.getDirection() == ChanBi.Direction.DOWN
                 && lastBi.getEndPrice().compareTo(lastZh.getZg()) > 0) {
 
-            // 置信度根据回踩位置与ZG的距离调整（越远越好）
             BigDecimal margin = lastBi.getEndPrice().subtract(lastZh.getZg());
             BigDecimal zhRange = lastZh.getZg().subtract(lastZh.getZd());
             double marginRatio = zhRange.compareTo(BigDecimal.ZERO) > 0
                     ? margin.divide(zhRange, 4, RoundingMode.HALF_UP).doubleValue() : 0;
             double confidence = Math.min(0.75 + marginRatio * 0.15, 0.90);
+
+            // 成交量确认
+            boolean breakoutVolumeUp = zhVolAvg > 0 && breakoutVolAvg > zhVolAvg * 1.2;  // 突破时放量20%+
+            boolean pullbackVolumeShrink = breakoutVolAvg > 0 && pullbackVolAvg < breakoutVolAvg * 0.8; // 回踩缩量
+            boolean breakoutVolumeWeak = zhVolAvg > 0 && breakoutVolAvg < zhVolAvg * 0.8; // 突破时缩量（假突破风险）
+
+            if (breakoutVolumeUp) confidence += 0.05;
+            if (pullbackVolumeShrink) confidence += 0.03;
+            if (breakoutVolumeWeak) confidence -= 0.05;
+            confidence = Math.max(0.50, Math.min(confidence, 0.95));
+
+            String volDesc = buildVolumeDesc(breakoutVolAvg, pullbackVolAvg, zhVolAvg,
+                    breakoutVolumeUp, pullbackVolumeShrink, breakoutVolumeWeak);
 
             ChanSignalPoint bp = new ChanSignalPoint();
             bp.setPointType(ChanSignalPoint.PointType.BUY_3);
@@ -784,9 +867,9 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
             bp.setTimestamp(lastBi.getEndTime());
             bp.setConfidence(confidence);
             bp.setFractalStrength(lastBi.getEndFractal().getStrength());
-            bp.setDescription(String.format("三买：突破中枢[%.2f-%.2f]后回踩至%.2f，距上沿%.2f%%",
+            bp.setDescription(String.format("三买：突破中枢[%.2f-%.2f]后回踩至%.2f，距上沿%.2f%% %s",
                     lastZh.getZd(), lastZh.getZg(), lastBi.getEndPrice(),
-                    marginRatio * 100));
+                    marginRatio * 100, volDesc));
             points.add(bp);
         }
 
@@ -802,17 +885,46 @@ public class ChanCalculator implements IndicatorCalculator<ChanResult> {
                     ? margin.divide(zhRange, 4, RoundingMode.HALF_UP).doubleValue() : 0;
             double confidence = Math.min(0.75 + marginRatio * 0.15, 0.90);
 
+            // 成交量确认（跌破时放量 = 有效跌破）
+            boolean breakoutVolumeUp = zhVolAvg > 0 && breakoutVolAvg > zhVolAvg * 1.2;
+            boolean pullbackVolumeShrink = breakoutVolAvg > 0 && pullbackVolAvg < breakoutVolAvg * 0.8;
+            boolean breakoutVolumeWeak = zhVolAvg > 0 && breakoutVolAvg < zhVolAvg * 0.8;
+
+            if (breakoutVolumeUp) confidence += 0.05;
+            if (pullbackVolumeShrink) confidence += 0.03;
+            if (breakoutVolumeWeak) confidence -= 0.05;
+            confidence = Math.max(0.50, Math.min(confidence, 0.95));
+
+            String volDesc = buildVolumeDesc(breakoutVolAvg, pullbackVolAvg, zhVolAvg,
+                    breakoutVolumeUp, pullbackVolumeShrink, breakoutVolumeWeak);
+
             ChanSignalPoint sp = new ChanSignalPoint();
             sp.setPointType(ChanSignalPoint.PointType.SELL_3);
             sp.setPrice(lastBi.getEndPrice());
             sp.setTimestamp(lastBi.getEndTime());
             sp.setConfidence(confidence);
             sp.setFractalStrength(lastBi.getEndFractal().getStrength());
-            sp.setDescription(String.format("三卖：跌破中枢[%.2f-%.2f]后反弹至%.2f，距下沿%.2f%%",
+            sp.setDescription(String.format("三卖：跌破中枢[%.2f-%.2f]后反弹至%.2f，距下沿%.2f%% %s",
                     lastZh.getZd(), lastZh.getZg(), lastBi.getEndPrice(),
-                    marginRatio * 100));
+                    marginRatio * 100, volDesc));
             points.add(sp);
         }
+    }
+
+    /**
+     * 构建成交量描述信息。
+     */
+    private String buildVolumeDesc(double breakoutVol, double pullbackVol, double zhVol,
+                                    boolean volUp, boolean volShrink, boolean volWeak) {
+        StringBuilder sb = new StringBuilder("| 量:");
+        if (zhVol > 0) {
+            sb.append(String.format(" 突破均量=%.0f(中枢均量%.0f的%.0f%%)",
+                    breakoutVol, zhVol, zhVol > 0 ? breakoutVol / zhVol * 100 : 0));
+        }
+        if (volUp) sb.append(" 突破放量✓");
+        if (volShrink) sb.append(" 回踩缩量✓");
+        if (volWeak) sb.append(" 突破缩量⚠");
+        return sb.toString();
     }
 
     // =========================================================================
