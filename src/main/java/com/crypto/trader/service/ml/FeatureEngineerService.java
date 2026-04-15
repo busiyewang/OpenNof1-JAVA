@@ -184,19 +184,44 @@ public class FeatureEngineerService {
     }
 
     /**
-     * 根据 K 线下一根的涨跌生成标签。
+     * 根据未来 N 根 K 线的加权收益生成标签。
      *
-     * @param nextKline 下一根 K 线
+     * <p>改进点：旧版只看下一根K线（噪声大），新版看未来多根K线加权平均，
+     * 近期权重大、远期权重小（指数衰减），信号更稳定。</p>
+     *
+     * @param futureKlines 未来 N 根 K 线列表（按时间正序）
      * @param currentClose 当前收盘价
-     * @param threshold 涨跌幅阈值（如 0.5 表示 0.5%）
+     * @param threshold    涨跌幅阈值（%）
      * @return 0=跌, 1=横盘, 2=涨
      */
-    public int generateLabel(Kline nextKline, double currentClose, double threshold) {
-        double nextClose = nextKline.getClose().doubleValue();
-        double change = (nextClose - currentClose) / currentClose * 100;
-        if (change > threshold) return 2;  // 涨
-        if (change < -threshold) return 0; // 跌
+    public int generateLabel(List<Kline> futureKlines, double currentClose, double threshold) {
+        if (futureKlines == null || futureKlines.isEmpty() || currentClose <= 0) return 1;
+
+        // 指数衰减加权：第1根权重=1.0, 第2根=0.7, 第3根=0.49, ...
+        double decay = 0.7;
+        double weightedReturn = 0;
+        double totalWeight = 0;
+
+        for (int i = 0; i < futureKlines.size(); i++) {
+            double futureClose = futureKlines.get(i).getClose().doubleValue();
+            double ret = (futureClose - currentClose) / currentClose * 100;
+            double weight = Math.pow(decay, i);
+            weightedReturn += ret * weight;
+            totalWeight += weight;
+        }
+
+        double avgReturn = totalWeight > 0 ? weightedReturn / totalWeight : 0;
+
+        if (avgReturn > threshold) return 2;  // 涨
+        if (avgReturn < -threshold) return 0; // 跌
         return 1; // 横盘
+    }
+
+    /**
+     * 兼容旧接口：单根 K 线标签（内部转为 list 调用）。
+     */
+    public int generateLabel(Kline nextKline, double currentClose, double threshold) {
+        return generateLabel(List.of(nextKline), currentClose, threshold);
     }
 
     /**

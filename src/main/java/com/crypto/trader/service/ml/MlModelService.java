@@ -14,6 +14,7 @@ import java.io.*;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -83,25 +84,37 @@ public class MlModelService {
             return msg;
         }
 
-        // 2. 加载链上数据
-        List<OnChainMetric> allOnChain = new ArrayList<>();
-        for (String metric : ONCHAIN_METRICS) {
-            allOnChain.addAll(onChainRepository.findTop100BySymbol(symbol, metric));
-        }
-        Map<String, BigDecimal> onChainMap = featureEngineer.buildOnChainMap(allOnChain);
-
-        // 3. 滑动窗口生成样本
+        // 2-3. 滑动窗口生成样本（链上数据按时间对齐，标签看未来5根K线加权收益）
         List<double[]> featureList = new ArrayList<>();
         List<Integer> labelList = new ArrayList<>();
+        int labelLookAhead = 5;
 
         int windowSize = FeatureEngineerService.MIN_KLINES;
-        for (int i = windowSize; i < allKlines.size() - 1; i++) {
+        // 链上数据缓存：每10根K线刷新一次（链上数据是日级别，不需要每根都查）
+        Map<String, BigDecimal> onChainMap = new HashMap<>();
+        Instant lastOnChainRefresh = Instant.MIN;
+
+        for (int i = windowSize; i < allKlines.size() - labelLookAhead; i++) {
+            Instant barTime = allKlines.get(i).getTimestamp();
+
+            // 每隔10根K线或跨天时刷新链上数据快照
+            if (Duration.between(lastOnChainRefresh, barTime).toHours() >= 24) {
+                onChainMap.clear();
+                for (String metric : ONCHAIN_METRICS) {
+                    onChainRepository.findLatestBefore(symbol, metric, barTime)
+                            .ifPresent(m -> onChainMap.put(m.getMetricName(), m.getValue()));
+                }
+                lastOnChainRefresh = barTime;
+            }
+
             List<Kline> window = allKlines.subList(i - windowSize, i + 1);
             float[] features = featureEngineer.extractFeatures(window, onChainMap);
             if (features == null) continue;
 
             double currentClose = allKlines.get(i).getClose().doubleValue();
-            int label = featureEngineer.generateLabel(allKlines.get(i + 1), currentClose, labelThreshold);
+            List<Kline> futureKlines = allKlines.subList(i + 1,
+                    Math.min(i + 1 + labelLookAhead, allKlines.size()));
+            int label = featureEngineer.generateLabel(futureKlines, currentClose, labelThreshold);
 
             featureList.add(toDouble(features));
             labelList.add(label);

@@ -97,7 +97,7 @@ public class OkxClient implements ExchangeClient {
             for (Object item : data) {
                 if (!(item instanceof List)) continue;
                 List<?> arr = (List<?>) item;
-                if (arr.size() < 6) continue;
+                if (arr.size() < 7) continue;
 
                 long ts = Long.parseLong(String.valueOf(arr.get(0)));
                 Kline k = new Kline();
@@ -108,7 +108,8 @@ public class OkxClient implements ExchangeClient {
                 k.setHigh(new BigDecimal(String.valueOf(arr.get(2))));
                 k.setLow(new BigDecimal(String.valueOf(arr.get(3))));
                 k.setClose(new BigDecimal(String.valueOf(arr.get(4))));
-                k.setVolume(new BigDecimal(String.valueOf(arr.get(5))));
+                // arr[5]=币本位成交量(BTC), arr[6]=USDT成交额 — 用USDT使不同价格时期可比
+                k.setVolume(new BigDecimal(String.valueOf(arr.get(6))));
                 result.add(k);
             }
 
@@ -241,7 +242,7 @@ public class OkxClient implements ExchangeClient {
             for (Object item : data) {
                 if (!(item instanceof List)) continue;
                 List<?> arr = (List<?>) item;
-                if (arr.size() < 6) continue;
+                if (arr.size() < 7) continue;
 
                 long ts = Long.parseLong(String.valueOf(arr.get(0)));
                 Kline k = new Kline();
@@ -252,7 +253,8 @@ public class OkxClient implements ExchangeClient {
                 k.setHigh(new BigDecimal(String.valueOf(arr.get(2))));
                 k.setLow(new BigDecimal(String.valueOf(arr.get(3))));
                 k.setClose(new BigDecimal(String.valueOf(arr.get(4))));
-                k.setVolume(new BigDecimal(String.valueOf(arr.get(5))));
+                // arr[5]=币本位成交量(BTC), arr[6]=USDT成交额 — 用USDT使不同价格时期可比
+                k.setVolume(new BigDecimal(String.valueOf(arr.get(6))));
                 result.add(k);
             }
 
