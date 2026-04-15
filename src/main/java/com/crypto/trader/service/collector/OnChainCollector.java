@@ -3,8 +3,8 @@ package com.crypto.trader.service.collector;
 import com.crypto.trader.client.glassnode.GlassnodeClient;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.repository.OnChainMetricRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -12,13 +12,12 @@ import java.util.List;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class OnChainCollector {
 
-    @Autowired
-    private GlassnodeClient glassnodeClient;
+    private final GlassnodeClient glassnodeClient;
 
-    @Autowired
-    private OnChainMetricRepository metricRepository;
+    private final OnChainMetricRepository metricRepository;
 
     /**
      * 拉取并保存所有链上指标（最近 24 小时）。

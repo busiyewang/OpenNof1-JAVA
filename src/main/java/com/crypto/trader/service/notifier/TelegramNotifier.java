@@ -1,8 +1,8 @@
 package com.crypto.trader.service.notifier;
 
 import com.crypto.trader.model.Signal;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -20,6 +20,7 @@ import java.util.Map;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class TelegramNotifier implements Notifier {
 
     private static final String TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -30,8 +31,7 @@ public class TelegramNotifier implements Notifier {
     @Value("${crypto.notifier.telegram.chat-id:}")
     private String chatId;
 
-    @Autowired
-    private WebClient.Builder webClientBuilder;
+    private final WebClient.Builder webClientBuilder;
 
     @Override
     public void notify(Signal signal) {

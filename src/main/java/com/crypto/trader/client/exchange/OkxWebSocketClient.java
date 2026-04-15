@@ -7,8 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
+import com.crypto.trader.util.OkxSymbolUtils;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.ProxySelector;
@@ -197,8 +198,8 @@ public class OkxWebSocketClient {
      * </pre>
      */
     private void subscribe(WebSocket ws, String symbol, String interval) {
-        String instId = toOkxInstId(symbol);
-        String channel = "candle" + toOkxBar(interval);  // candle1m, candle1H, candle1D...
+        String instId = OkxSymbolUtils.toOkxInstId(symbol);
+        String channel = "candle" + OkxSymbolUtils.toOkxBar(interval);  // candle1m, candle1H, candle1D...
         String key = symbol + ":" + interval;
 
         if (subscriptions.containsKey(key)) return;
@@ -250,8 +251,8 @@ public class OkxWebSocketClient {
                 String channel = arg.path("channel").asText();
                 String instId = arg.path("instId").asText();
 
-                String interval = parseIntervalFromChannel(channel);
-                String symbol = fromOkxInstId(instId);
+                String interval = OkxSymbolUtils.parseIntervalFromChannel(channel);
+                String symbol = OkxSymbolUtils.fromOkxInstId(instId);
 
                 JsonNode dataArr = root.get("data");
                 for (JsonNode item : dataArr) {
@@ -329,41 +330,4 @@ public class OkxWebSocketClient {
         scheduler.schedule(this::connect, delay, TimeUnit.SECONDS);
     }
 
-    // =========================================================================
-    // 工具方法
-    // =========================================================================
-
-    /** candle1m -> 1m, candle1H -> 1h, candle1D -> 1d */
-    private String parseIntervalFromChannel(String channel) {
-        if (channel == null || !channel.startsWith("candle")) return "1m";
-        String raw = channel.substring(6);
-        return raw.toLowerCase();
-    }
-
-    /** BTC-USDT -> BTCUSDT */
-    private String fromOkxInstId(String instId) {
-        if (instId == null) return null;
-        return instId.replace("-", "");
-    }
-
-    /** BTCUSDT -> BTC-USDT */
-    private String toOkxInstId(String symbol) {
-        if (symbol == null || symbol.length() < 4) return symbol;
-        String base  = symbol.substring(0, symbol.length() - 4);
-        String quote = symbol.substring(symbol.length() - 4);
-        return base + "-" + quote;
-    }
-
-    /** 内部周期 -> OKX bar */
-    private String toOkxBar(String interval) {
-        if (interval == null) return "1m";
-        return switch (interval) {
-            case "1m", "3m", "5m", "15m", "30m" -> interval;
-            case "1h"  -> "1H";
-            case "2h"  -> "2H";
-            case "4h"  -> "4H";
-            case "1d"  -> "1D";
-            default    -> "1m";
-        };
-    }
 }

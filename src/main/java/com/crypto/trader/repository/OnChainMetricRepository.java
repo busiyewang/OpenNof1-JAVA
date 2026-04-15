@@ -17,4 +17,6 @@ public interface OnChainMetricRepository extends JpaRepository<OnChainMetric, Lo
     default List<OnChainMetric> findTop100BySymbol(String symbol, String metricName) {
         return findLatest(symbol, metricName, org.springframework.data.domain.PageRequest.of(0, 100));
     }
+
+    boolean existsBySymbolAndMetricNameAndTimestamp(String symbol, String metricName, java.time.Instant timestamp);
 }

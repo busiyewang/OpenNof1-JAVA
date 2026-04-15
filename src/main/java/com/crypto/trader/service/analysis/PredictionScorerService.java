@@ -6,8 +6,8 @@ import com.crypto.trader.model.PredictionScore;
 import com.crypto.trader.repository.AnalysisReportRepository;
 import com.crypto.trader.repository.KlineRepository;
 import com.crypto.trader.repository.PredictionScoreRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -32,16 +32,14 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class PredictionScorerService {
 
-    @Autowired
-    private AnalysisReportRepository reportRepository;
+    private final AnalysisReportRepository reportRepository;
 
-    @Autowired
-    private KlineRepository klineRepository;
+    private final KlineRepository klineRepository;
 
-    @Autowired
-    private PredictionScoreRepository scoreRepository;
+    private final PredictionScoreRepository scoreRepository;
 
     /** 容差百分比：支撑/阻力位判定的容差 */
     private static final double TOLERANCE_PERCENT = 1.0;

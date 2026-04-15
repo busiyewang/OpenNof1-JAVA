@@ -2,15 +2,15 @@ package com.crypto.trader.service.analyzer;
 
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.repository.OnChainMetricRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
+@RequiredArgsConstructor
 public class WhaleAnalyzer {
 
-    @Autowired
-    private OnChainMetricRepository metricRepository;
+    private final OnChainMetricRepository metricRepository;
 
     /**
      * 通过链上指标的“近期均值 vs 之前均值”来粗略判断巨鲸行为。
@@ -25,7 +25,7 @@ public class WhaleAnalyzer {
      * <p>注意：该规则非常简化，真实场景通常还需要结合价格、成交量、转账规模分布等维度。</p>
      */
     public int analyzeWhaleActivity(String symbol) {
-        List<OnChainMetric> recent = metricRepository.findTop100BySymbol(symbol, "whale_transaction_count");
+        List<OnChainMetric> recent = metricRepository.findTop100BySymbol(symbol, "whale_transfer_volume");
         if (recent.size() < 10) return 0;
 
         // recent 默认按 timestamp DESC（最新在前）。这里取最近 5 条 vs 再往前 5 条的均值做对比。

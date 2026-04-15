@@ -1,12 +1,12 @@
 package com.crypto.trader.service.strategy;
 
-import com.crypto.trader.client.mcp.McpClient;
+import com.crypto.trader.client.mcp.DeepSeekClient;
 import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
@@ -14,13 +14,12 @@ import java.util.List;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class McpPredictionStrategy implements TradingStrategy {
 
-    @Autowired
-    private McpClient mcpClient;
+    private final DeepSeekClient deepSeekClient;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     @Value("${crypto.mcp.enabled:false}")
     private boolean mcpEnabled;
@@ -54,7 +53,7 @@ public class McpPredictionStrategy implements TradingStrategy {
             String prompt = buildPrompt(symbol, klines, onChainData);
             log.debug("[MCP] {} Prompt 长度: {} 字符", symbol, prompt.length());
 
-            String prediction = mcpClient.predict(prompt);
+            String prediction = deepSeekClient.predict(prompt);
             long elapsed = System.currentTimeMillis() - t0;
 
             if (prediction == null || prediction.isEmpty()) {
@@ -104,7 +103,9 @@ public class McpPredictionStrategy implements TradingStrategy {
         sb.append("Recent price data (timestamp, close):\n");
         recent.forEach(k -> sb.append(k.getTimestamp()).append(": ").append(k.getClose()).append("\n"));
         sb.append("\nOn-chain metrics (whale transaction count):\n");
-        onChainData.stream().limit(5).forEach(m -> sb.append(m.getTimestamp()).append(": ").append(m.getValue()).append("\n"));
+        if (onChainData != null && !onChainData.isEmpty()) {
+            onChainData.stream().limit(5).forEach(m -> sb.append(m.getTimestamp()).append(": ").append(m.getValue()).append("\n"));
+        }
         sb.append("\nPlease respond in format: ACTION: BUY/SELL/HOLD, CONFIDENCE: 0.xx, REASON: ...");
         return sb.toString();
     }

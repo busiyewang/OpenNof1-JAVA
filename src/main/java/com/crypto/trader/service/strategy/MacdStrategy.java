@@ -4,18 +4,18 @@ import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.indicator.MacdCalculator;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class MacdStrategy implements TradingStrategy {
 
-    @Autowired
-    private MacdCalculator macdCalculator;
+    private final MacdCalculator macdCalculator;
 
     /**
      * 使用 MACD 指标对短期趋势进行判断并生成交易信号。

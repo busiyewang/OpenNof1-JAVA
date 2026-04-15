@@ -8,7 +8,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
-import javax.annotation.PostConstruct;
+import com.crypto.trader.util.OkxSymbolUtils;
+import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -54,8 +55,8 @@ public class OkxClient implements ExchangeClient {
      */
     @Override
     public List<Kline> getKlines(String symbol, String interval, long startTime, long endTime) {
-        String instId = toOkxInstId(symbol);
-        String bar = toOkxBar(interval);
+        String instId = OkxSymbolUtils.toOkxInstId(symbol);
+        String bar = OkxSymbolUtils.toOkxBar(interval);
 
         log.info("[OKX REST] 获取K线: instId={}, bar={}, range=[{} ~ {}]",
                 instId, bar, Instant.ofEpochMilli(startTime), Instant.ofEpochMilli(endTime));
@@ -207,8 +208,8 @@ public class OkxClient implements ExchangeClient {
      * @param endpoint API 端点路径
      */
     private List<Kline> fetchOnePage(String symbol, String interval, long cursor, String endpoint) {
-        String instId = toOkxInstId(symbol);
-        String bar = toOkxBar(interval);
+        String instId = OkxSymbolUtils.toOkxInstId(symbol);
+        String bar = OkxSymbolUtils.toOkxBar(interval);
 
         try {
             @SuppressWarnings("unchecked")
@@ -262,28 +263,4 @@ public class OkxClient implements ExchangeClient {
         }
     }
 
-    /** BTCUSDT -> BTC-USDT */
-    String toOkxInstId(String symbol) {
-        if (symbol == null || symbol.length() < 4) return symbol;
-        String base  = symbol.substring(0, symbol.length() - 4);
-        String quote = symbol.substring(symbol.length() - 4);
-        return base + "-" + quote;
-    }
-
-    /** 内部周期 -> OKX bar 参数 */
-    String toOkxBar(String interval) {
-        if (interval == null) return "1m";
-        return switch (interval) {
-            case "1m", "3m", "5m", "15m", "30m" -> interval;
-            case "1h"  -> "1H";
-            case "2h"  -> "2H";
-            case "4h"  -> "4H";
-            case "6h"  -> "6H";
-            case "12h" -> "12H";
-            case "1d"  -> "1D";
-            case "1w"  -> "1W";
-            case "1M"  -> "1M";
-            default    -> "1m";
-        };
-    }
 }

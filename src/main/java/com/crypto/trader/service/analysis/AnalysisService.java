@@ -1,6 +1,6 @@
 package com.crypto.trader.service.analysis;
 
-import com.crypto.trader.client.mcp.McpClient;
+import com.crypto.trader.client.mcp.DeepSeekClient;
 import com.crypto.trader.client.mcp.dto.DeepSeekAnalysisResult;
 import com.crypto.trader.client.mcp.dto.TimeframeAnalysis;
 import com.crypto.trader.model.AnalysisReport;
@@ -16,8 +16,8 @@ import com.crypto.trader.service.indicator.MacdCalculator;
 import com.crypto.trader.service.indicator.chan.ChanResult;
 import com.crypto.trader.service.strategy.TradingStrategy;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -33,40 +33,30 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class AnalysisService {
 
-    @Autowired
-    private KlineRepository klineRepository;
+    private final KlineRepository klineRepository;
 
-    @Autowired
-    private OnChainMetricRepository onChainRepository;
+    private final OnChainMetricRepository onChainRepository;
 
-    @Autowired
-    private MacdCalculator macdCalculator;
+    private final MacdCalculator macdCalculator;
 
-    @Autowired
-    private BollingerBandsCalculator bollingerCalculator;
+    private final BollingerBandsCalculator bollingerCalculator;
 
-    @Autowired
-    private McpClient mcpClient;
+    private final DeepSeekClient deepSeekClient;
 
-    @Autowired
-    private PromptBuilder promptBuilder;
+    private final PromptBuilder promptBuilder;
 
-    @Autowired
-    private AnalysisResponseParser responseParser;
+    private final AnalysisResponseParser responseParser;
 
-    @Autowired
-    private AnalysisReportRepository reportRepository;
+    private final AnalysisReportRepository reportRepository;
 
-    @Autowired
-    private List<TradingStrategy> strategies;
+    private final List<TradingStrategy> strategies;
 
-    @Autowired
-    private ChanCalculator chanCalculator;
+    private final ChanCalculator chanCalculator;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     @Value("${crypto.analysis.timeframes:1h,4h,1d}")
     private List<String> timeframes;
@@ -171,7 +161,7 @@ public class AnalysisService {
 
         // 6. 调用 DeepSeek
         log.info("[分析] {} 调用 DeepSeek 进行分析...", symbol);
-        String rawResponse = mcpClient.analyze(prompt);
+        String rawResponse = deepSeekClient.analyze(prompt);
 
         // 7. 解析结果
         DeepSeekAnalysisResult result = responseParser.parse(rawResponse);

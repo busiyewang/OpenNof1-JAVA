@@ -2,6 +2,7 @@ package com.crypto.trader.service.indicator.chan;
 
 import lombok.Data;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 
@@ -33,6 +34,6 @@ public class ChanZhongshu {
 
     /** 中枢中心价格 */
     public BigDecimal getCenter() {
-        return zg.add(zd).divide(BigDecimal.valueOf(2), zg.scale(), BigDecimal.ROUND_HALF_UP);
+        return zg.add(zd).divide(BigDecimal.valueOf(2), zg.scale(), RoundingMode.HALF_UP);
     }
 }

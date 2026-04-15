@@ -2,8 +2,8 @@ package com.crypto.trader.service.analysis;
 
 import com.crypto.trader.client.mcp.dto.DeepSeekAnalysisResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -16,10 +16,10 @@ import java.util.regex.Pattern;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class AnalysisResponseParser {
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     /** 匹配 markdown 代码块中的 JSON */
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```(?:json)?\\s*\\n?(\\{.*?})\\s*```", Pattern.DOTALL);

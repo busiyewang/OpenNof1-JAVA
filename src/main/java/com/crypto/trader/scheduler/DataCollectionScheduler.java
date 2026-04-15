@@ -3,8 +3,8 @@ package com.crypto.trader.scheduler;
 import com.crypto.trader.service.collector.KlineCollector;
 import com.crypto.trader.service.collector.MarketDataCollector;
 import com.crypto.trader.service.collector.OnChainCollector;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -12,16 +12,14 @@ import java.util.List;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class DataCollectionScheduler {
 
-    @Autowired
-    private KlineCollector klineCollector;
+    private final KlineCollector klineCollector;
 
-    @Autowired
-    private OnChainCollector onChainCollector;
+    private final OnChainCollector onChainCollector;
 
-    @Autowired
-    private MarketDataCollector marketDataCollector;
+    private final MarketDataCollector marketDataCollector;
 
     @Value("${crypto.watch-list}")
     private List<String> watchList;

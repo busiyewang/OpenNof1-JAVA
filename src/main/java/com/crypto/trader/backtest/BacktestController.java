@@ -2,7 +2,7 @@ package com.crypto.trader.backtest;
 
 import com.crypto.trader.backtest.model.BacktestReport;
 import com.crypto.trader.backtest.model.BacktestRequest;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -42,10 +42,10 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/backtest")
+@RequiredArgsConstructor
 public class BacktestController {
 
-    @Autowired
-    private BacktestService backtestService;
+    private final BacktestService backtestService;
 
     /**
      * 完整回测（POST JSON）。

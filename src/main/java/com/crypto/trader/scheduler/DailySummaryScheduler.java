@@ -6,8 +6,8 @@ import com.crypto.trader.repository.AnalysisReportRepository;
 import com.crypto.trader.repository.PredictionScoreRepository;
 import com.crypto.trader.repository.SignalRepository;
 import com.crypto.trader.service.notifier.Notifier;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -33,19 +33,16 @@ import java.util.stream.Collectors;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class DailySummaryScheduler {
 
-    @Autowired
-    private SignalRepository signalRepository;
+    private final SignalRepository signalRepository;
 
-    @Autowired
-    private AnalysisReportRepository reportRepository;
+    private final AnalysisReportRepository reportRepository;
 
-    @Autowired
-    private PredictionScoreRepository scoreRepository;
+    private final PredictionScoreRepository scoreRepository;
 
-    @Autowired
-    private List<Notifier> notifiers;
+    private final List<Notifier> notifiers;
 
     @Value("${crypto.watch-list}")
     private List<String> watchList;

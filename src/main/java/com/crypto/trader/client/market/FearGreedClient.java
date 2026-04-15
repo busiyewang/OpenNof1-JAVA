@@ -2,7 +2,6 @@ package com.crypto.trader.client.market;
 
 import com.crypto.trader.model.OnChainMetric;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -33,8 +32,11 @@ public class FearGreedClient {
 
     private static final String API_URL = "https://api.alternative.me/fng/";
 
-    @Autowired
-    private WebClient.Builder webClientBuilder;
+    private final WebClient.Builder webClientBuilder;
+
+    public FearGreedClient(WebClient.Builder webClientBuilder) {
+        this.webClientBuilder = webClientBuilder;
+    }
 
     /**
      * 获取最近 N 天的恐惧贪婪指数。

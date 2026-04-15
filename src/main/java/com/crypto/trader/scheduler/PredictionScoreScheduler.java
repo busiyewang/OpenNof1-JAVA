@@ -1,8 +1,8 @@
 package com.crypto.trader.scheduler;
 
 import com.crypto.trader.service.analysis.PredictionScorerService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -16,10 +16,10 @@ import java.util.List;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class PredictionScoreScheduler {
 
-    @Autowired
-    private PredictionScorerService scorerService;
+    private final PredictionScorerService scorerService;
 
     @Value("${crypto.watch-list}")
     private List<String> watchList;

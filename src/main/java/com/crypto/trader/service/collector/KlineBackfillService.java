@@ -3,9 +3,8 @@ package com.crypto.trader.service.collector;
 import com.crypto.trader.client.exchange.OkxClient;
 import com.crypto.trader.model.Kline;
 import com.crypto.trader.repository.KlineRepository;
-import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -23,13 +22,12 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class KlineBackfillService {
 
-    @Autowired
-    private OkxClient okxClient;
+    private final OkxClient okxClient;
 
-    @Autowired
-    private KlineRepository klineRepository;
+    private final KlineRepository klineRepository;
 
     /** 每次 API 请求间隔（毫秒），OKX 限制 3次/秒/IP */
     private static final long API_SLEEP_MS = 350;
@@ -101,7 +99,7 @@ public class KlineBackfillService {
         List<Kline> allKlines = okxClient.getKlinesHistory(
                 symbol, interval, startTime.toEpochMilli(), endTime.toEpochMilli(), API_SLEEP_MS);
 
-        progress.setTotalFetched(allKlines.size());
+        progress.totalFetched.set(allKlines.size());
 
         if (!allKlines.isEmpty()) {
             batchSaveWithDedup(allKlines, progress);
@@ -127,7 +125,7 @@ public class KlineBackfillService {
             List<Kline> segment = okxClient.getKlinesHistory(
                     symbol, interval, segStart, cursor, API_SLEEP_MS);
 
-            progress.setTotalFetched(progress.getTotalFetched() + segment.size());
+            progress.totalFetched.addAndGet(segment.size());
 
             if (!segment.isEmpty()) {
                 batchSaveWithDedup(segment, progress);
@@ -168,9 +166,9 @@ public class KlineBackfillService {
 
             if (!newKlines.isEmpty()) {
                 klineRepository.saveAll(newKlines);
-                progress.setSavedCount(progress.getSavedCount() + newKlines.size());
+                progress.savedCount.addAndGet(newKlines.size());
             }
-            progress.setSkippedCount(progress.getSkippedCount() + (batch.size() - newKlines.size()));
+            progress.skippedCount.addAndGet(batch.size() - newKlines.size());
 
             log.debug("[回填] 批次 {}-{}: 新增={}, 跳过={}",
                     i, end, newKlines.size(), batch.size() - newKlines.size());
@@ -207,7 +205,6 @@ public class KlineBackfillService {
         RUNNING, COMPLETED, FAILED
     }
 
-    @Data
     public static class BackfillProgress {
         private String symbol;
         private String interval;
@@ -216,9 +213,32 @@ public class KlineBackfillService {
         private Instant endTime;
         private Instant startedAt;
         private Instant finishedAt;
-        private int totalFetched;
-        private int savedCount;
-        private int skippedCount;
+        private AtomicInteger totalFetched = new AtomicInteger();
+        private AtomicInteger savedCount = new AtomicInteger();
+        private AtomicInteger skippedCount = new AtomicInteger();
         private String message;
+
+        public String getSymbol() { return symbol; }
+        public void setSymbol(String symbol) { this.symbol = symbol; }
+        public String getInterval() { return interval; }
+        public void setInterval(String interval) { this.interval = interval; }
+        public BackfillStatus getStatus() { return status; }
+        public void setStatus(BackfillStatus status) { this.status = status; }
+        public Instant getStartTime() { return startTime; }
+        public void setStartTime(Instant startTime) { this.startTime = startTime; }
+        public Instant getEndTime() { return endTime; }
+        public void setEndTime(Instant endTime) { this.endTime = endTime; }
+        public Instant getStartedAt() { return startedAt; }
+        public void setStartedAt(Instant startedAt) { this.startedAt = startedAt; }
+        public Instant getFinishedAt() { return finishedAt; }
+        public void setFinishedAt(Instant finishedAt) { this.finishedAt = finishedAt; }
+        public int getTotalFetched() { return totalFetched.get(); }
+        public void setTotalFetched(int value) { totalFetched.set(value); }
+        public int getSavedCount() { return savedCount.get(); }
+        public void setSavedCount(int value) { savedCount.set(value); }
+        public int getSkippedCount() { return skippedCount.get(); }
+        public void setSkippedCount(int value) { skippedCount.set(value); }
+        public String getMessage() { return message; }
+        public void setMessage(String message) { this.message = message; }
     }
 }

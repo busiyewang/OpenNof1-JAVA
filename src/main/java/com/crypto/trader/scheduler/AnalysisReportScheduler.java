@@ -3,8 +3,8 @@ package com.crypto.trader.scheduler;
 import com.crypto.trader.model.AnalysisReport;
 import com.crypto.trader.service.analysis.AnalysisService;
 import com.crypto.trader.service.notifier.AnalysisEmailSender;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -18,13 +18,12 @@ import java.util.List;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class AnalysisReportScheduler {
 
-    @Autowired
-    private AnalysisService analysisService;
+    private final AnalysisService analysisService;
 
-    @Autowired
-    private AnalysisEmailSender emailSender;
+    private final AnalysisEmailSender emailSender;
 
     @Value("${crypto.watch-list}")
     private List<String> watchList;

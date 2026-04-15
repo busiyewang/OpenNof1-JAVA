@@ -5,8 +5,8 @@ import com.crypto.trader.client.market.FearGreedClient;
 import com.crypto.trader.client.market.OkxMarketDataClient;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.repository.OnChainMetricRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -16,19 +16,16 @@ import java.util.List;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class MarketDataCollector {
 
-    @Autowired
-    private OkxMarketDataClient okxMarketDataClient;
+    private final OkxMarketDataClient okxMarketDataClient;
 
-    @Autowired
-    private FearGreedClient fearGreedClient;
+    private final FearGreedClient fearGreedClient;
 
-    @Autowired
-    private CoinglassClient coinglassClient;
+    private final CoinglassClient coinglassClient;
 
-    @Autowired
-    private OnChainMetricRepository metricRepository;
+    private final OnChainMetricRepository metricRepository;
 
     /**
      * 采集所有市场数据指标。

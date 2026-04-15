@@ -7,8 +7,8 @@ import com.crypto.trader.repository.KlineRepository;
 import com.crypto.trader.repository.OnChainMetricRepository;
 import com.crypto.trader.repository.SignalRepository;
 import com.crypto.trader.service.notifier.Notifier;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
@@ -20,27 +20,23 @@ import java.util.stream.Collectors;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class StrategyExecutor {
 
-    @Autowired
-    private List<TradingStrategy> strategies;
+    private final List<TradingStrategy> strategies;
 
-    @Autowired
-    private List<Notifier> notifiers;
+    private final List<Notifier> notifiers;
 
-    @Autowired
-    private KlineRepository klineRepository;
+    private final KlineRepository klineRepository;
 
-    @Autowired
-    private OnChainMetricRepository onChainRepository;
+    private final OnChainMetricRepository onChainRepository;
 
-    @Autowired
-    private SignalRepository signalRepository;
+    private final SignalRepository signalRepository;
 
     public void execute(String symbol) {
         log.info("[策略执行] -------- {} 开始策略评估 --------", symbol);
 
-        List<Kline> klinesDesc = klineRepository.findTop100BySymbolOrderByTimestampDesc(symbol);
+        List<Kline> klinesDesc = klineRepository.findLatestKlines(symbol, "1h", 100);
         List<OnChainMetric> metrics = onChainRepository.findTop100BySymbol(symbol, "whale_transfer_volume");
 
         if (klinesDesc == null || klinesDesc.isEmpty()) {

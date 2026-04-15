@@ -5,21 +5,20 @@ import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.analyzer.WhaleAnalyzer;
 import com.crypto.trader.service.indicator.MacdCalculator;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class WhaleCombinedStrategy implements TradingStrategy {
 
-    @Autowired
-    private WhaleAnalyzer whaleAnalyzer;
+    private final WhaleAnalyzer whaleAnalyzer;
 
-    @Autowired
-    private MacdCalculator macdCalculator;
+    private final MacdCalculator macdCalculator;
 
     /**
      * 结合巨鲸行为与 MACD 的联合信号策略。

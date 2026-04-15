@@ -7,7 +7,7 @@ import com.crypto.trader.repository.PredictionScoreRepository;
 import com.crypto.trader.service.analysis.AnalysisService;
 import com.crypto.trader.service.analysis.PredictionScorerService;
 import com.crypto.trader.service.notifier.AnalysisEmailSender;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,22 +20,18 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/analysis")
+@RequiredArgsConstructor
 public class AnalysisController {
 
-    @Autowired
-    private AnalysisService analysisService;
+    private final AnalysisService analysisService;
 
-    @Autowired
-    private AnalysisReportRepository reportRepository;
+    private final AnalysisReportRepository reportRepository;
 
-    @Autowired
-    private AnalysisEmailSender emailSender;
+    private final AnalysisEmailSender emailSender;
 
-    @Autowired
-    private PredictionScoreRepository scoreRepository;
+    private final PredictionScoreRepository scoreRepository;
 
-    @Autowired
-    private PredictionScorerService scorerService;
+    private final PredictionScorerService scorerService;
 
     /** 按需触发分析（同时发送邮件） */
     @PostMapping("/{symbol}")

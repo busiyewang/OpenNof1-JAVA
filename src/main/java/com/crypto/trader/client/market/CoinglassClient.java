@@ -2,7 +2,6 @@ package com.crypto.trader.client.market;
 
 import com.crypto.trader.model.OnChainMetric;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
@@ -10,6 +9,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,8 +39,11 @@ public class CoinglassClient {
     @Value("${crypto.coinglass.api-key:}")
     private String apiKey;
 
-    @Autowired
-    private WebClient.Builder webClientBuilder;
+    private final WebClient.Builder webClientBuilder;
+
+    public CoinglassClient(WebClient.Builder webClientBuilder) {
+        this.webClientBuilder = webClientBuilder;
+    }
 
     /**
      * 获取最近 24 小时的爆仓数据。
@@ -116,7 +119,7 @@ public class CoinglassClient {
                         ratio.setSymbol(symbol);
                         ratio.setMetricName("liquidation_long_short_ratio");
                         ratio.setTimestamp(now);
-                        ratio.setValue(longVal.divide(shortVal, 4, BigDecimal.ROUND_HALF_UP));
+                        ratio.setValue(longVal.divide(shortVal, 4, RoundingMode.HALF_UP));
                         result.add(ratio);
                     }
                 }

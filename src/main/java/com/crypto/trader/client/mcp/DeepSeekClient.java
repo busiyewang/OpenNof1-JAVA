@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 
 /**
@@ -18,7 +18,7 @@ import java.time.Duration;
  */
 @Service
 @Slf4j
-public class McpClient {
+public class DeepSeekClient {
 
     private WebClient webClient;
     private final WebClient.Builder webClientBuilder;
@@ -74,7 +74,7 @@ public class McpClient {
             "}\n\n" +
             "Respond ONLY with valid JSON. No markdown, no code blocks, no extra text.";
 
-    public McpClient(WebClient.Builder webClientBuilder) {
+    public DeepSeekClient(WebClient.Builder webClientBuilder) {
         this.webClientBuilder = webClientBuilder;
     }
 
@@ -130,14 +130,14 @@ public class McpClient {
 
             if (response != null && response.getChoices() != null && response.getChoices().length > 0) {
                 String content = response.getChoices()[0].getMessage().getContent();
-                log.debug("[McpClient] DeepSeek response length: {} chars", content.length());
+                log.debug("[DeepSeek] DeepSeek response length: {} chars", content.length());
                 return content;
             }
 
-            log.warn("[McpClient] Empty response from DeepSeek");
+            log.warn("[DeepSeek] Empty response from DeepSeek");
             return "";
         } catch (Exception e) {
-            log.error("[McpClient] DeepSeek API call failed: {}", e.getMessage());
+            log.error("[DeepSeek] DeepSeek API call failed: {}", e.getMessage());
             return "";
         }
     }

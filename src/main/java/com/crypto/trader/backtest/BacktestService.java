@@ -9,8 +9,8 @@ import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.repository.KlineRepository;
 import com.crypto.trader.service.strategy.TradingStrategy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -24,13 +24,12 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class BacktestService {
 
-    @Autowired
-    private KlineRepository klineRepository;
+    private final KlineRepository klineRepository;
 
-    @Autowired
-    private List<TradingStrategy> allStrategies;
+    private final List<TradingStrategy> allStrategies;
 
     /**
      * 执行回测。
@@ -92,9 +91,11 @@ public class BacktestService {
                     strategy.getName(), request, trades, engine.getFinalCapital(), klines.size());
             reports.add(report);
 
-            log.info("[回测] {} 完成: 交易{}次, 胜率{:.1f}%, 总收益{:.2f}%, 最大回撤{:.2f}%",
-                    strategy.getName(), report.getTotalTrades(), report.getWinRate(),
-                    report.getTotalReturnPercent(), report.getMaxDrawdownPercent());
+            log.info("[回测] {} 完成: 交易{}次, 胜率{}%, 总收益{}%, 最大回撤{}%",
+                    strategy.getName(), report.getTotalTrades(),
+                    String.format("%.1f", report.getWinRate()),
+                    String.format("%.2f", report.getTotalReturnPercent()),
+                    String.format("%.2f", report.getMaxDrawdownPercent()));
         }
 
         // 按总收益率降序排列

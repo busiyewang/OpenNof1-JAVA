@@ -4,18 +4,18 @@ import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.indicator.BollingerBandsCalculator;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class BollingerStrategy implements TradingStrategy {
 
-    @Autowired
-    private BollingerBandsCalculator bollingerCalculator;
+    private final BollingerBandsCalculator bollingerCalculator;
 
     /**
      * 使用布林带判断价格偏离并生成交易信号。

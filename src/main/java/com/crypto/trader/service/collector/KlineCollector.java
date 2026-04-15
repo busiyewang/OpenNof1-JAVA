@@ -4,13 +4,15 @@ import com.crypto.trader.client.exchange.ExchangeClient;
 import com.crypto.trader.client.exchange.OkxWebSocketClient;
 import com.crypto.trader.model.Kline;
 import com.crypto.trader.repository.KlineRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -25,16 +27,14 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class KlineCollector {
 
-    @Autowired
-    private ExchangeClient exchangeClient;
+    private final ExchangeClient exchangeClient;
 
-    @Autowired
-    private KlineRepository klineRepository;
+    private final KlineRepository klineRepository;
 
-    @Autowired
-    private OkxWebSocketClient okxWebSocketClient;
+    private final OkxWebSocketClient okxWebSocketClient;
 
     /**
      * 启动时注册 WebSocket K 线回调。
@@ -50,25 +50,20 @@ public class KlineCollector {
      */
     private void onKlineReceived(Kline kline) {
         try {
-            boolean exists = klineRepository.existsBySymbolAndIntervalAndTimestamp(
-                    kline.getSymbol(), kline.getInterval(), kline.getTimestamp());
-            if (exists) {
-                // 已存在则更新（WebSocket 会推送未完成 K 线的实时更新）
-                klineRepository.findBySymbolAndIntervalAndTimestamp(
-                        kline.getSymbol(), kline.getInterval(), kline.getTimestamp()
-                ).ifPresent(existing -> {
-                    existing.setOpen(kline.getOpen());
-                    existing.setHigh(kline.getHigh());
-                    existing.setLow(kline.getLow());
-                    existing.setClose(kline.getClose());
-                    existing.setVolume(kline.getVolume());
-                    klineRepository.save(existing);
-                });
-            } else {
+            klineRepository.findBySymbolAndIntervalAndTimestamp(
+                    kline.getSymbol(), kline.getInterval(), kline.getTimestamp()
+            ).ifPresentOrElse(existing -> {
+                existing.setOpen(kline.getOpen());
+                existing.setHigh(kline.getHigh());
+                existing.setLow(kline.getLow());
+                existing.setClose(kline.getClose());
+                existing.setVolume(kline.getVolume());
+                klineRepository.save(existing);
+            }, () -> {
                 klineRepository.save(kline);
                 log.debug("[KlineCollector] WS kline saved: {} {} ts={}",
                         kline.getSymbol(), kline.getInterval(), kline.getTimestamp());
-            }
+            });
         } catch (Exception e) {
             log.error("[KlineCollector] Failed to save WS kline for {}", kline.getSymbol(), e);
         }
@@ -88,9 +83,12 @@ public class KlineCollector {
             return;
         }
 
+        // Batch dedup: one query instead of N
+        List<Instant> timestamps = klines.stream().map(Kline::getTimestamp).collect(Collectors.toList());
+        Set<Instant> existingTimestamps = new HashSet<>(
+                klineRepository.findExistingTimestamps(symbol, interval, timestamps));
         List<Kline> newKlines = klines.stream()
-                .filter(k -> !klineRepository.existsBySymbolAndIntervalAndTimestamp(
-                        k.getSymbol(), k.getInterval(), k.getTimestamp()))
+                .filter(k -> !existingTimestamps.contains(k.getTimestamp()))
                 .collect(Collectors.toList());
 
         if (!newKlines.isEmpty()) {

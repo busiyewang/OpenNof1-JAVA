@@ -10,8 +10,8 @@ import com.crypto.trader.service.indicator.chan.ChanResult.TrendType;
 import com.crypto.trader.service.indicator.chan.ChanSignalPoint;
 import com.crypto.trader.service.indicator.chan.ChanSignalPoint.PointType;
 import com.crypto.trader.service.indicator.chan.ChanZhongshu;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -33,10 +33,10 @@ import java.util.List;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class ChanStrategy implements TradingStrategy {
 
-    @Autowired
-    private ChanCalculator chanCalculator;
+    private final ChanCalculator chanCalculator;
 
     @Override
     public Signal evaluate(String symbol, List<Kline> klines, List<OnChainMetric> onChainData) {
@@ -63,7 +63,7 @@ public class ChanStrategy implements TradingStrategy {
 
         Signal.Action action = isBuyPoint(best.getPointType()) ? Signal.Action.BUY : Signal.Action.SELL;
 
-        log.info("[缠论策略] {} 信号: {} | 类型={} | 走势={} | 背驰={} | 置信度={:.2f} | 分型强弱={}",
+        log.info("[缠论策略] {} 信号: {} | 类型={} | 走势={} | 背驰={} | 置信度={} | 分型强弱={}",
                 symbol, action, best.getPointType(), result.getTrendType(),
                 best.getDivergenceType(), best.getConfidence(), best.getFractalStrength());
 

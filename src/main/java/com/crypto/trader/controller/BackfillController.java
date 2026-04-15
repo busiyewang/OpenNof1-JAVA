@@ -2,7 +2,7 @@ package com.crypto.trader.controller;
 
 import com.crypto.trader.service.collector.KlineBackfillService;
 import com.crypto.trader.service.collector.KlineBackfillService.BackfillProgress;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,10 +36,10 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/backfill")
+@RequiredArgsConstructor
 public class BackfillController {
 
-    @Autowired
-    private KlineBackfillService backfillService;
+    private final KlineBackfillService backfillService;
 
     /**
      * 触发单个周期的历史数据回填。
