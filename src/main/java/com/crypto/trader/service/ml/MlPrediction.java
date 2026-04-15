@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * XGBoost 模型预测结果。
+ * ML 模型预测结果（Smile GradientTreeBoost）。
  */
 @Data
 @Builder

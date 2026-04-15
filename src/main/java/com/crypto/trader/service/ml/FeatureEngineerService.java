@@ -12,7 +12,7 @@ import java.math.BigDecimal;
 import java.util.*;
 
 /**
- * 特征工程服务 — 基于 TA4J 从 K 线和链上数据中提取 XGBoost 所需的数值特征。
+ * 特征工程服务 — 基于 TA4J 从 K 线和链上数据中提取 ML 模型所需的数值特征。
  *
  * <p>改进点（对比旧版手写计算）：</p>
  * <ul>
@@ -171,6 +171,13 @@ public class FeatureEngineerService {
             features[37] = safeFloat(onChainData.get("exchange_net_flow"));
             features[38] = safeFloat(onChainData.get("exchange_inflow"));
             features[39] = safeFloat(onChainData.get("exchange_outflow"));
+        }
+
+        // NaN/Infinity 清洗：防止异常值导致 ML 训练失败
+        for (int i = 0; i < features.length; i++) {
+            if (Float.isNaN(features[i]) || Float.isInfinite(features[i])) {
+                features[i] = 0f;
+            }
         }
 
         return features;

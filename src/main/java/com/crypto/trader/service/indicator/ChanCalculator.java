@@ -5,7 +5,6 @@ import com.crypto.trader.service.indicator.chan.*;
 import com.crypto.trader.service.indicator.chan.ChanResult.BigDecimalPair;
 import com.crypto.trader.service.indicator.chan.ChanResult.DivergenceType;
 import com.crypto.trader.service.indicator.chan.ChanResult.TrendType;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.ta4j.core.BarSeries;
@@ -31,7 +30,6 @@ import java.util.List;
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class ChanCalculator implements IndicatorCalculator<ChanResult> {
 
     /** 笔内最少K线数：顶底分型各占3根，中间至少1根独立K线 = 5根最少 */

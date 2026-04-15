@@ -90,7 +90,7 @@ crypto:
     weekly-cron: "0 0 9 ? * MON"   # 每周分析时间（默认周一早9点）
     timezone: Asia/Shanghai
 
-  # ========== XGBoost ML 模型 ==========
+  # ========== ML 模型（Smile GradientTreeBoost）==========
   ml:
     model-dir: ${ML_MODEL_DIR:./ml-models}  # 模型文件存储目录
     label-threshold: 0.3                     # 涨跌幅阈值(%)，超过为涨/跌，否则横盘

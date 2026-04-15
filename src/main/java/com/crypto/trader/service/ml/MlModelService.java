@@ -6,13 +6,11 @@ import com.crypto.trader.repository.KlineRepository;
 import com.crypto.trader.repository.OnChainMetricRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import ml.dmlc.xgboost4j.java.Booster;
-import ml.dmlc.xgboost4j.java.DMatrix;
-import ml.dmlc.xgboost4j.java.XGBoost;
-import ml.dmlc.xgboost4j.java.XGBoostError;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import smile.classification.GradientTreeBoost;
 
+import java.io.*;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,12 +20,12 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * XGBoost 模型管理服务 — 负责训练、预测、持久化。
+ * ML 模型管理服务 — 基于 Smile GradientTreeBoost（纯 Java，无 native 依赖）。
  *
  * <p>训练数据来源：数据库中的历史 K 线 + 链上数据。
  * 标签生成：根据下一根 K 线的涨跌幅分为 3 类（跌/横盘/涨）。</p>
  *
- * <p>模型按 symbol+interval 维度管理，文件保存到 {@code crypto.ml.model-dir} 目录。</p>
+ * <p>模型按 symbol+interval 维度管理，序列化到 {@code crypto.ml.model-dir} 目录。</p>
  */
 @Service
 @Slf4j
@@ -38,8 +36,8 @@ public class MlModelService {
     private final KlineRepository klineRepository;
     private final OnChainMetricRepository onChainRepository;
 
-    /** 内存中缓存已加载的 Booster，key = "symbol:interval" */
-    private final ConcurrentHashMap<String, Booster> modelCache = new ConcurrentHashMap<>();
+    /** 内存中缓存已加载的模型，key = "symbol:interval" */
+    private final ConcurrentHashMap<String, GradientTreeBoost> modelCache = new ConcurrentHashMap<>();
 
     @Value("${crypto.ml.model-dir:./ml-models}")
     private String modelDir;
@@ -56,10 +54,13 @@ public class MlModelService {
             "exchange_net_flow", "exchange_inflow", "exchange_outflow"
     );
 
+    /** 类别数 */
+    private static final int NUM_CLASSES = 3;
+
     // ======================== 训练 ========================
 
     /**
-     * 使用历史数据训练 XGBoost 模型。
+     * 使用历史数据训练 GradientTreeBoost 模型。
      *
      * @param symbol   交易对
      * @param interval K 线周期（如 1h）
@@ -90,7 +91,7 @@ public class MlModelService {
         Map<String, BigDecimal> onChainMap = featureEngineer.buildOnChainMap(allOnChain);
 
         // 3. 滑动窗口生成样本
-        List<float[]> featureList = new ArrayList<>();
+        List<double[]> featureList = new ArrayList<>();
         List<Integer> labelList = new ArrayList<>();
 
         int windowSize = FeatureEngineerService.MIN_KLINES;
@@ -102,7 +103,7 @@ public class MlModelService {
             double currentClose = allKlines.get(i).getClose().doubleValue();
             int label = featureEngineer.generateLabel(allKlines.get(i + 1), currentClose, labelThreshold);
 
-            featureList.add(features);
+            featureList.add(toDouble(features));
             labelList.add(label);
         }
 
@@ -114,72 +115,54 @@ public class MlModelService {
 
         log.info("[ML训练] {} {} 生成 {} 个训练样本", symbol, interval, featureList.size());
 
-        // 4. 构建 DMatrix 并训练
+        // 4. 转换为 Smile 要求的数据格式并训练
         try {
             int numSamples = featureList.size();
-            int numFeatures = FeatureEngineerService.FEATURE_COUNT;
 
-            // 展平为一维数组
-            float[] flatData = new float[numSamples * numFeatures];
-            float[] labels = new float[numSamples];
-            for (int i = 0; i < numSamples; i++) {
-                System.arraycopy(featureList.get(i), 0, flatData, i * numFeatures, numFeatures);
-                labels[i] = labelList.get(i);
-            }
+            double[][] x = featureList.toArray(new double[0][]);
+            int[] y = labelList.stream().mapToInt(Integer::intValue).toArray();
 
             // 分割训练集/验证集 (80/20)
             int trainSize = (int) (numSamples * 0.8);
-            float[] trainData = Arrays.copyOf(flatData, trainSize * numFeatures);
-            float[] trainLabels = Arrays.copyOf(labels, trainSize);
-            float[] valData = Arrays.copyOfRange(flatData, trainSize * numFeatures, numSamples * numFeatures);
-            float[] valLabels = Arrays.copyOfRange(labels, trainSize, numSamples);
+            double[][] trainX = Arrays.copyOf(x, trainSize);
+            int[] trainY = Arrays.copyOf(y, trainSize);
+            double[][] valX = Arrays.copyOfRange(x, trainSize, numSamples);
+            int[] valY = Arrays.copyOfRange(y, trainSize, numSamples);
 
-            DMatrix trainMatrix = new DMatrix(trainData, trainSize, numFeatures);
-            trainMatrix.setLabel(trainLabels);
+            // Smile GradientTreeBoost 参数:
+            // ntrees=200, maxDepth=6, maxNodes=20, nodeSize=3, shrinkage=0.1, subsample=0.8
+            GradientTreeBoost model = GradientTreeBoost.fit(trainX, trainY,
+                    200,    // ntrees
+                    6,      // maxDepth
+                    20,     // maxNodes
+                    3,      // nodeSize (min samples per leaf)
+                    0.1,    // shrinkage (learning rate)
+                    0.8     // subsample
+            );
 
-            DMatrix valMatrix = new DMatrix(valData, numSamples - trainSize, numFeatures);
-            valMatrix.setLabel(valLabels);
-
-            // XGBoost 参数
-            Map<String, Object> params = new LinkedHashMap<>();
-            params.put("objective", "multi:softprob");
-            params.put("num_class", 3);
-            params.put("max_depth", 6);
-            params.put("eta", 0.1);
-            params.put("subsample", 0.8);
-            params.put("colsample_bytree", 0.8);
-            params.put("min_child_weight", 3);
-            params.put("eval_metric", "mlogloss");
-            params.put("nthread", 4);
-
-            Map<String, DMatrix> watches = new LinkedHashMap<>();
-            watches.put("train", trainMatrix);
-            watches.put("val", valMatrix);
-
-            int numRounds = 200;
-            Booster booster = XGBoost.train(trainMatrix, params, numRounds, watches, null, null);
-
-            // 5. 保存模型
+            // 5. 保存模型（Java 序列化）
             String modelKey = modelKey(symbol, interval);
-            Path modelPath = Path.of(modelDir, modelKey + ".xgb");
+            Path modelPath = Path.of(modelDir, modelKey + ".model");
             Files.createDirectories(modelPath.getParent());
-            booster.saveModel(modelPath.toString());
+            try (ObjectOutputStream oos = new ObjectOutputStream(
+                    new BufferedOutputStream(new FileOutputStream(modelPath.toFile())))) {
+                oos.writeObject(model);
+            }
 
-            modelCache.put(modelKey, booster);
+            modelCache.put(modelKey, model);
 
             // 6. 计算验证集准确率
-            float[][] valPreds = booster.predict(valMatrix);
             int correct = 0;
-            for (int i = 0; i < valPreds.length; i++) {
-                int predClass = argmax(valPreds[i]);
-                if (predClass == (int) valLabels[i]) correct++;
+            for (int i = 0; i < valX.length; i++) {
+                int predicted = model.predict(valX[i]);
+                if (predicted == valY[i]) correct++;
             }
-            double accuracy = (double) correct / valPreds.length * 100;
+            double accuracy = valX.length > 0 ? (double) correct / valX.length * 100 : 0;
 
             long elapsed = System.currentTimeMillis() - t0;
 
             // 统计类别分布
-            int[] classCounts = new int[3];
+            int[] classCounts = new int[NUM_CLASSES];
             for (int l : labelList) classCounts[l]++;
 
             String report = String.format(
@@ -190,10 +173,6 @@ public class MlModelService {
             log.info(report);
             return report;
 
-        } catch (XGBoostError e) {
-            String msg = "[ML训练] XGBoost 训练失败: " + e.getMessage();
-            log.error(msg, e);
-            return msg;
         } catch (Exception e) {
             String msg = "[ML训练] 训练异常: " + e.getMessage();
             log.error(msg, e);
@@ -206,16 +185,16 @@ public class MlModelService {
     /**
      * 使用训练好的模型进行预测。
      *
-     * @param symbol   交易对
-     * @param interval K 线周期
-     * @param klines   最新 K 线（按时间正序，至少 30 根）
+     * @param symbol      交易对
+     * @param interval    K 线周期
+     * @param klines      最新 K 线（按时间正序，至少 30 根）
      * @param onChainData 链上指标最新值
      * @return 预测结果，或 null（模型未就绪时）
      */
     public MlPrediction predict(String symbol, String interval,
                                  List<Kline> klines, Map<String, BigDecimal> onChainData) {
-        Booster booster = getModel(symbol, interval);
-        if (booster == null) {
+        GradientTreeBoost model = getModel(symbol, interval);
+        if (model == null) {
             log.debug("[ML预测] {} {} 模型未加载，跳过预测", symbol, interval);
             return null;
         }
@@ -227,20 +206,26 @@ public class MlModelService {
         }
 
         try {
-            DMatrix dm = new DMatrix(features, 1, FeatureEngineerService.FEATURE_COUNT);
-            float[][] preds = booster.predict(dm);
-            if (preds.length == 0) return null;
+            double[] sample = toDouble(features);
+            double[] posteriori = new double[NUM_CLASSES];
+            int predicted = model.predict(sample, posteriori);
 
-            MlPrediction prediction = MlPrediction.fromProbabilities(preds[0]);
+            // 转为 float[] 兼容 MlPrediction
+            float[] probs = new float[NUM_CLASSES];
+            for (int i = 0; i < NUM_CLASSES; i++) {
+                probs[i] = (float) posteriori[i];
+            }
+
+            MlPrediction prediction = MlPrediction.fromProbabilities(probs);
             log.info("[ML预测] {} {} → {} (置信度={}%, P[跌]={}%, P[横盘]={}%, P[涨]={}%)",
                     symbol, interval, prediction.getDirection(),
                     String.format("%.1f", prediction.getConfidence() * 100),
-                    String.format("%.1f", preds[0][0] * 100),
-                    String.format("%.1f", preds[0][1] * 100),
-                    String.format("%.1f", preds[0][2] * 100));
+                    String.format("%.1f", probs[0] * 100),
+                    String.format("%.1f", probs[1] * 100),
+                    String.format("%.1f", probs[2] * 100));
             return prediction;
 
-        } catch (XGBoostError e) {
+        } catch (Exception e) {
             log.error("[ML预测] {} {} 预测失败: {}", symbol, interval, e.getMessage());
             return null;
         }
@@ -255,20 +240,21 @@ public class MlModelService {
 
     // ======================== 内部方法 ========================
 
-    private Booster getModel(String symbol, String interval) {
+    private GradientTreeBoost getModel(String symbol, String interval) {
         String key = modelKey(symbol, interval);
-        Booster booster = modelCache.get(key);
-        if (booster != null) return booster;
+        GradientTreeBoost model = modelCache.get(key);
+        if (model != null) return model;
 
         // 尝试从文件加载
-        Path modelPath = Path.of(modelDir, key + ".xgb");
+        Path modelPath = Path.of(modelDir, key + ".model");
         if (Files.exists(modelPath)) {
-            try {
-                booster = XGBoost.loadModel(modelPath.toString());
-                modelCache.put(key, booster);
+            try (ObjectInputStream ois = new ObjectInputStream(
+                    new BufferedInputStream(new FileInputStream(modelPath.toFile())))) {
+                model = (GradientTreeBoost) ois.readObject();
+                modelCache.put(key, model);
                 log.info("[ML] 从文件加载模型: {}", modelPath);
-                return booster;
-            } catch (XGBoostError e) {
+                return model;
+            } catch (Exception e) {
                 log.error("[ML] 模型加载失败: {}", e.getMessage());
             }
         }
@@ -279,11 +265,12 @@ public class MlModelService {
         return symbol.toLowerCase() + "_" + interval;
     }
 
-    private int argmax(float[] arr) {
-        int best = 0;
-        for (int i = 1; i < arr.length; i++) {
-            if (arr[i] > arr[best]) best = i;
+    /** float[] → double[] 转换（Smile 使用 double）*/
+    private double[] toDouble(float[] arr) {
+        double[] result = new double[arr.length];
+        for (int i = 0; i < arr.length; i++) {
+            result[i] = arr[i];
         }
-        return best;
+        return result;
     }
 }

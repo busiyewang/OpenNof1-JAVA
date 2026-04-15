@@ -126,7 +126,7 @@ public class Ta4jIndicatorService {
                     k.getHigh().doubleValue(),
                     k.getLow().doubleValue(),
                     k.getClose().doubleValue(),
-                    k.getVolume().doubleValue()
+                    k.getVolume() != null ? k.getVolume().doubleValue() : 0
             );
         }
         return series;
@@ -141,6 +141,15 @@ public class Ta4jIndicatorService {
     public IndicatorSnapshot calculateAll(List<Kline> klines) {
         if (klines == null || klines.size() < 30) return null;
 
+        try {
+            return doCalculateAll(klines);
+        } catch (Exception e) {
+            log.error("[TA4J] 指标计算异常: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    private IndicatorSnapshot doCalculateAll(List<Kline> klines) {
         BarSeries series = buildBarSeries(klines);
         int last = series.getEndIndex();
 

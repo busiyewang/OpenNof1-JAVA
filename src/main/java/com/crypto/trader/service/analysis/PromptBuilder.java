@@ -106,7 +106,7 @@ public class PromptBuilder {
         // ========== 3. 策略引擎结论 ==========
         appendStrategySignals(sb, strategySignals);
 
-        // ========== 3.5 XGBoost ML 模型预测 ==========
+        // ========== 3.5 ML 模型预测 ==========
         appendMlPrediction(sb, mlPrediction);
 
         // ========== 4. 缠论详细分析 ==========
@@ -259,13 +259,13 @@ public class PromptBuilder {
     }
 
     // =========================================================================
-    // XGBoost ML 模型预测渲染
+    // ML 模型预测渲染
     // =========================================================================
 
     private void appendMlPrediction(StringBuilder sb, MlPrediction prediction) {
         if (prediction == null) return;
 
-        sb.append("\n== XGBoost 专用预测模型结果 ==\n");
+        sb.append("\n== ML 专用预测模型结果 ==\n");
         sb.append("（基于40维量化特征训练的机器学习模型，非LLM推测）\n\n");
         sb.append("预测方向: ").append(prediction.getDirection()).append("\n");
         sb.append("模型置信度: ").append(String.format("%.1f%%", prediction.getConfidence() * 100)).append("\n");

@@ -165,7 +165,7 @@ public class AnalysisService {
         // 4. 运行缠论分析，获取详细结构
         ChanResult chanResult = chanCalculator.calculate(latestKlines);
 
-        // 4.5 运行 XGBoost ML 模型预测
+        // 4.5 运行 ML 模型预测
         MlPrediction mlPrediction = null;
         if (mlModelService.isModelReady(symbol, "1h")) {
             // 收集所有链上指标用于 ML 特征

@@ -16,10 +16,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 基于 XGBoost 专用模型的交易策略。
+ * 基于 Smile GradientTreeBoost 专用模型的交易策略。
  *
  * <p>与 McpPredictionStrategy（LLM预测）不同，此策略使用历史数据训练的
- * XGBoost 分类模型进行预测，具有以下优势：</p>
+ * GradientTreeBoost 分类模型进行预测，具有以下优势：</p>
  * <ul>
  *   <li>基于28维量化特征，不依赖自然语言</li>
  *   <li>可回测、可量化准确率</li>
@@ -62,7 +62,7 @@ public class MlPredictionStrategy implements TradingStrategy {
         double price = klines.get(klines.size() - 1).getClose().doubleValue();
         float[] probs = prediction.getProbabilities();
 
-        String reason = String.format("XGBoost: %s (P[跌]=%.1f%%, P[横盘]=%.1f%%, P[涨]=%.1f%%)",
+        String reason = String.format("ML-GBT: %s (P[跌]=%.1f%%, P[横盘]=%.1f%%, P[涨]=%.1f%%)",
                 prediction.getDirection(),
                 probs[0] * 100, probs[1] * 100, probs[2] * 100);
 
@@ -105,7 +105,7 @@ public class MlPredictionStrategy implements TradingStrategy {
 
     @Override
     public String getName() {
-        return "XGBoost-ML";
+        return "GBT-ML";
     }
 
     private Signal holdSignal(String symbol) {
