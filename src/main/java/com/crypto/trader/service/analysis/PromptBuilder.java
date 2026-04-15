@@ -4,6 +4,7 @@ import com.crypto.trader.client.mcp.dto.TimeframeAnalysis;
 import com.crypto.trader.model.OnChainMetric;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.service.indicator.chan.*;
+import com.crypto.trader.service.ml.MlPrediction;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -25,13 +26,14 @@ public class PromptBuilder {
     private PredictionScorerService predictionScorerService;
 
     /**
-     * 构建完整的分析 prompt（含策略结论和缠论分析）。
+     * 构建完整的分析 prompt（含策略结论、缠论分析和 ML 预测）。
      */
     public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
                         Map<String, List<OnChainMetric>> onChainMetrics,
                         Map<String, List<OnChainMetric>> marketMetrics,
                         BigDecimal currentPrice,
-                        List<Signal> strategySignals, ChanResult chanResult) {
+                        List<Signal> strategySignals, ChanResult chanResult,
+                        MlPrediction mlPrediction) {
         StringBuilder sb = new StringBuilder();
 
         // ========== 0. 历史表现反馈（进化核心） ==========
@@ -72,6 +74,9 @@ public class PromptBuilder {
 
         // ========== 3. 策略引擎结论 ==========
         appendStrategySignals(sb, strategySignals);
+
+        // ========== 3.5 XGBoost ML 模型预测 ==========
+        appendMlPrediction(sb, mlPrediction);
 
         // ========== 4. 缠论详细分析 ==========
         appendChanAnalysis(sb, chanResult);
@@ -149,11 +154,24 @@ public class PromptBuilder {
     }
 
     /**
+     * 兼容旧调用（含策略和缠论，无 ML 预测）。
+     */
+    public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
+                        Map<String, List<OnChainMetric>> onChainMetrics,
+                        Map<String, List<OnChainMetric>> marketMetrics,
+                        BigDecimal currentPrice,
+                        List<Signal> strategySignals, ChanResult chanResult) {
+        return build(symbol, timeframeAnalyses, onChainMetrics, marketMetrics, currentPrice,
+                strategySignals, chanResult, null);
+    }
+
+    /**
      * 兼容旧调用（无策略结论和市场数据）。
      */
     public String build(String symbol, List<TimeframeAnalysis> timeframeAnalyses,
                         Map<String, List<OnChainMetric>> onChainMetrics, BigDecimal currentPrice) {
-        return build(symbol, timeframeAnalyses, onChainMetrics, Map.of(), currentPrice, List.of(), null);
+        return build(symbol, timeframeAnalyses, onChainMetrics, Map.of(), currentPrice,
+                List.of(), null, null);
     }
 
     // =========================================================================
@@ -207,6 +225,29 @@ public class PromptBuilder {
             sb.append(" → 无明确方向");
         }
         sb.append("\n");
+    }
+
+    // =========================================================================
+    // XGBoost ML 模型预测渲染
+    // =========================================================================
+
+    private void appendMlPrediction(StringBuilder sb, MlPrediction prediction) {
+        if (prediction == null) return;
+
+        sb.append("\n== XGBoost 专用预测模型结果 ==\n");
+        sb.append("（基于28维量化特征训练的机器学习模型，非LLM推测）\n\n");
+        sb.append("预测方向: ").append(prediction.getDirection()).append("\n");
+        sb.append("模型置信度: ").append(String.format("%.1f%%", prediction.getConfidence() * 100)).append("\n");
+
+        float[] probs = prediction.getProbabilities();
+        if (probs != null && probs.length == 3) {
+            sb.append("概率分布: 下跌=").append(String.format("%.1f%%", probs[0] * 100))
+              .append(", 横盘=").append(String.format("%.1f%%", probs[1] * 100))
+              .append(", 上涨=").append(String.format("%.1f%%", probs[2] * 100)).append("\n");
+        }
+
+        sb.append("\n重要提示: 此模型基于历史数据量化训练，其预测结果应作为核心参考依据。\n");
+        sb.append("当 ML 模型与技术指标方向一致时，可提高置信度；方向矛盾时，需更审慎判断。\n");
     }
 
     // =========================================================================

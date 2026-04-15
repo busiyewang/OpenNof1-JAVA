@@ -14,6 +14,9 @@ import com.crypto.trader.service.indicator.BollingerBandsCalculator;
 import com.crypto.trader.service.indicator.ChanCalculator;
 import com.crypto.trader.service.indicator.MacdCalculator;
 import com.crypto.trader.service.indicator.chan.ChanResult;
+import com.crypto.trader.service.ml.FeatureEngineerService;
+import com.crypto.trader.service.ml.MlModelService;
+import com.crypto.trader.service.ml.MlPrediction;
 import com.crypto.trader.service.strategy.TradingStrategy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +58,10 @@ public class AnalysisService {
     private final List<TradingStrategy> strategies;
 
     private final ChanCalculator chanCalculator;
+
+    private final MlModelService mlModelService;
+
+    private final FeatureEngineerService featureEngineer;
 
     private final ObjectMapper objectMapper;
 
@@ -154,9 +161,26 @@ public class AnalysisService {
         // 4. 运行缠论分析，获取详细结构
         ChanResult chanResult = chanCalculator.calculate(latestKlines);
 
-        // 5. 构建 Prompt（含策略结论、缠论分析和市场数据）
+        // 4.5 运行 XGBoost ML 模型预测
+        MlPrediction mlPrediction = null;
+        if (mlModelService.isModelReady(symbol, "1h")) {
+            // 收集所有链上指标用于 ML 特征
+            List<OnChainMetric> allOnChainForMl = new ArrayList<>();
+            onChainMetrics.values().forEach(allOnChainForMl::addAll);
+            Map<String, BigDecimal> onChainMap = featureEngineer.buildOnChainMap(allOnChainForMl);
+            mlPrediction = mlModelService.predict(symbol, "1h", latestKlines, onChainMap);
+            if (mlPrediction != null) {
+                log.info("[分析] {} ML预测: {} (置信度={}%)", symbol,
+                        mlPrediction.getDirection(),
+                        String.format("%.1f", mlPrediction.getConfidence() * 100));
+            }
+        } else {
+            log.info("[分析] {} ML模型未就绪，跳过ML预测", symbol);
+        }
+
+        // 5. 构建 Prompt（含策略结论、缠论分析、市场数据和 ML 预测）
         String prompt = promptBuilder.build(symbol, tfAnalyses, onChainMetrics, marketMetrics,
-                currentPrice, strategySignals, chanResult);
+                currentPrice, strategySignals, chanResult, mlPrediction);
         log.info("[分析] {} Prompt 构建完成，长度: {} 字符", symbol, prompt.length());
 
         // 6. 调用 DeepSeek
