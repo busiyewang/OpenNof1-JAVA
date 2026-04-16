@@ -1,6 +1,7 @@
 package com.crypto.trader.client.market;
 
 import com.crypto.trader.model.OnChainMetric;
+import com.crypto.trader.util.RetryUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
@@ -48,11 +49,13 @@ public class FearGreedClient {
             WebClient client = webClientBuilder.build();
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = client.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    client.get()
                     .uri(API_URL + "?limit=" + days + "&format=json")
                     .retrieve()
                     .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                    .block();
+                    .block(),
+                    "FearGreed-index");
 
             if (response == null || !response.containsKey("data")) {
                 log.warn("[FearGreed] 响应为空");

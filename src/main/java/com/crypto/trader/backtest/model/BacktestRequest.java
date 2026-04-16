@@ -47,4 +47,34 @@ public class BacktestRequest {
 
     /** 手续费率（单边，如 0.1 表示 0.1%） */
     private double feePercent = 0.1;
+
+    // ========== 滑点 ==========
+
+    /** 滑点（基点，5 = 0.05%），默认 5bps */
+    private double slippageBps = 5.0;
+
+    // ========== 动态仓位 ==========
+
+    /** 是否启用动态仓位（根据置信度和波动率调整） */
+    private boolean dynamicPositionSizing = false;
+
+    /** 动态仓位上限 (0-1) */
+    private double maxPositionSizePercent = 0.8;
+
+    /** 动态仓位下限 (0-1) */
+    private double minPositionSizePercent = 0.1;
+
+    // ========== 风控 ==========
+
+    /** 是否启用风控 */
+    private boolean riskManagementEnabled = false;
+
+    /** 最大回撤百分比（超过则熔断） */
+    private double maxDrawdownPercent = 15.0;
+
+    /** 单日最大亏损百分比 */
+    private double dailyLossLimitPercent = 5.0;
+
+    /** 暂停交易的连续亏损次数 */
+    private int consecutiveLossPauseThreshold = 5;
 }

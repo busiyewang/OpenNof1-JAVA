@@ -2,6 +2,7 @@ package com.crypto.trader.client.mcp;
 
 import com.crypto.trader.client.mcp.dto.McpRequest;
 import com.crypto.trader.client.mcp.dto.McpResponse;
+import com.crypto.trader.util.RetryUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -118,7 +119,8 @@ public class DeepSeekClient {
                 .build();
 
         try {
-            McpResponse response = webClient.post()
+            McpResponse response = RetryUtil.withRetry(() ->
+                    webClient.post()
                     .uri("")
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
@@ -126,7 +128,8 @@ public class DeepSeekClient {
                     .retrieve()
                     .bodyToMono(McpResponse.class)
                     .timeout(Duration.ofSeconds(timeoutSeconds))
-                    .block();
+                    .block(),
+                    "DeepSeek-API");
 
             if (response != null && response.getChoices() != null && response.getChoices().length > 0) {
                 String content = response.getChoices()[0].getMessage().getContent();

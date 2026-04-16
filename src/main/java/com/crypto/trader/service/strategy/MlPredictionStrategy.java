@@ -62,8 +62,8 @@ public class MlPredictionStrategy implements TradingStrategy {
         double price = klines.get(klines.size() - 1).getClose().doubleValue();
         float[] probs = prediction.getProbabilities();
 
-        String reason = String.format("ML-GBT: %s (P[跌]=%.1f%%, P[横盘]=%.1f%%, P[涨]=%.1f%%)",
-                prediction.getDirection(),
+        String reason = String.format("ML-GBT: %s (%d-bar ahead, P[跌]=%.1f%%, P[横盘]=%.1f%%, P[涨]=%.1f%%)",
+                prediction.getDirection(), prediction.getPredictionHorizon(),
                 probs[0] * 100, probs[1] * 100, probs[2] * 100);
 
         // 置信度不足 → HOLD

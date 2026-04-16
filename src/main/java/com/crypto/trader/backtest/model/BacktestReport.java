@@ -56,6 +56,24 @@ public class BacktestReport {
     /** 最大连续亏损次数 */
     private int maxConsecutiveLosses;
 
+    // ========== 滑点与仓位统计 ==========
+
+    /** 总滑点成本 (USDT) */
+    @Builder.Default
+    private double totalSlippageCost = 0;
+    /** 平均仓位比例 */
+    @Builder.Default
+    private double avgPositionSizePercent = 0;
+
+    // ========== 风控统计 ==========
+
+    /** 回撤熔断触发次数 */
+    @Builder.Default
+    private int circuitBreakerTriggers = 0;
+    /** 日亏损限额触发次数 */
+    @Builder.Default
+    private int dailyLimitTriggers = 0;
+
     // ========== 交易明细 ==========
     private List<Trade> trades;
 }

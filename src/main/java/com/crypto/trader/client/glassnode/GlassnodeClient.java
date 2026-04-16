@@ -1,6 +1,7 @@
 package com.crypto.trader.client.glassnode;
 
 import com.crypto.trader.model.OnChainMetric;
+import com.crypto.trader.util.RetryUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -92,7 +93,8 @@ public class GlassnodeClient {
                                             Instant from, Instant to, String resolution) {
         String ticker = toGlassnodeAsset(asset);
         try {
-            List<Map<String, Object>> response = webClient.get()
+            List<Map<String, Object>> response = RetryUtil.withRetry(() ->
+                    webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(endpoint)
                             .queryParam("a", ticker)
@@ -103,7 +105,8 @@ public class GlassnodeClient {
                             .build())
                     .retrieve()
                     .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-                    .block();
+                    .block(),
+                    "Glassnode-" + metricName);
 
             if (response == null || response.isEmpty()) {
                 return List.of();

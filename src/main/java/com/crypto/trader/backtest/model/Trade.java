@@ -12,7 +12,7 @@ import java.time.Instant;
 public class Trade {
 
     public enum Direction { LONG, SHORT }
-    public enum ExitReason { SIGNAL, STOP_LOSS, TAKE_PROFIT, END_OF_DATA }
+    public enum ExitReason { SIGNAL, STOP_LOSS, TAKE_PROFIT, END_OF_DATA, CIRCUIT_BREAKER }
 
     private int tradeNo;
     private Direction direction;
@@ -29,4 +29,10 @@ public class Trade {
     private String entryReason;
     /** 持仓 K 线数 */
     private int holdBars;
+    /** 本笔滑点成本 (USDT) */
+    @Builder.Default
+    private double slippageCost = 0;
+    /** 实际使用的仓位比例 */
+    @Builder.Default
+    private double positionSizeUsed = 0;
 }

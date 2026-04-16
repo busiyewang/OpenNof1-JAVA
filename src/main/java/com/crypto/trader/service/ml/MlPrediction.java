@@ -26,6 +26,10 @@ public class MlPrediction {
     /** 人可读的方向描述 */
     private String direction;
 
+    /** 预测时间窗口（K线根数），与训练时 labelLookAhead 一致 */
+    @Builder.Default
+    private int predictionHorizon = 5;
+
     public static MlPrediction fromProbabilities(float[] probs) {
         int bestClass = 0;
         float bestProb = probs[0];

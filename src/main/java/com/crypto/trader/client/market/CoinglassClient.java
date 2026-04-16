@@ -1,6 +1,7 @@
 package com.crypto.trader.client.market;
 
 import com.crypto.trader.model.OnChainMetric;
+import com.crypto.trader.util.RetryUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -59,13 +60,15 @@ public class CoinglassClient {
             WebClient client = webClientBuilder.build();
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = client.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    client.get()
                     .uri(BASE_URL + "/public/v2/liquidation?symbol=" + coin + "&time_type=1")
                     .header("coinglassSecret", apiKey)
                     .retrieve()
                     .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                     .timeout(TIMEOUT)
-                    .block();
+                    .block(),
+                    "Coinglass-liquidations-" + symbol);
 
             if (response == null) {
                 return List.of();

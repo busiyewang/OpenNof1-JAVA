@@ -1,6 +1,7 @@
 package com.crypto.trader.client.market;
 
 import com.crypto.trader.model.OnChainMetric;
+import com.crypto.trader.util.RetryUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -55,7 +56,8 @@ public class OkxMarketDataClient {
         String instId = toSwapInstId(symbol);
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClient.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/v5/public/funding-rate")
                             .queryParam("instId", instId)
@@ -63,7 +65,8 @@ public class OkxMarketDataClient {
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(TIMEOUT)
-                    .block();
+                    .block(),
+                    "OkxMarket-fundingRate-" + symbol);
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 log.warn("[OkxMarket] 资金费率响应异常: {}", response);
@@ -121,7 +124,8 @@ public class OkxMarketDataClient {
         String instId = toSwapInstId(symbol);
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClient.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/v5/public/funding-rate-history")
                             .queryParam("instId", instId)
@@ -130,7 +134,8 @@ public class OkxMarketDataClient {
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(TIMEOUT)
-                    .block();
+                    .block(),
+                    "OkxMarket-fundingRateHistory-" + symbol);
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 return List.of();
@@ -179,7 +184,8 @@ public class OkxMarketDataClient {
         String instId = toSwapInstId(symbol);
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClient.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/v5/public/open-interest")
                             .queryParam("instType", "SWAP")
@@ -188,7 +194,8 @@ public class OkxMarketDataClient {
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(TIMEOUT)
-                    .block();
+                    .block(),
+                    "OkxMarket-openInterest-" + symbol);
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 log.warn("[OkxMarket] 持仓量响应异常: {}", response);

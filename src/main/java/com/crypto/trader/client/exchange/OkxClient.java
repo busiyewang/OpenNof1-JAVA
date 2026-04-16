@@ -1,6 +1,7 @@
 package com.crypto.trader.client.exchange;
 
 import com.crypto.trader.model.Kline;
+import com.crypto.trader.util.RetryUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -63,7 +64,8 @@ public class OkxClient implements ExchangeClient {
 
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClient.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/v5/market/candles")
                             .queryParam("instId", instId)
@@ -75,11 +77,8 @@ public class OkxClient implements ExchangeClient {
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(REQUEST_TIMEOUT)
-                    .doOnError(WebClientRequestException.class, e ->
-                            log.error("[OKX REST] K线请求连接失败: {}", e.getMessage()))
-                    .doOnError(WebClientResponseException.class, e ->
-                            log.error("[OKX REST] K线请求HTTP错误: status={} body={}", e.getStatusCode(), e.getResponseBodyAsString()))
-                    .block();
+                    .block(),
+                    "OKX-getKlines-" + symbol);
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 log.warn("[OKX REST] K线响应异常: {}:{} response={}", symbol, interval, response);
@@ -214,7 +213,8 @@ public class OkxClient implements ExchangeClient {
 
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClient.get()
+            Map<String, Object> response = RetryUtil.withRetry(() ->
+                    webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(endpoint)
                             .queryParam("instId", instId)
@@ -226,7 +226,8 @@ public class OkxClient implements ExchangeClient {
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(REQUEST_TIMEOUT)
-                    .block();
+                    .block(),
+                    "OKX-fetchOnePage-" + symbol);
 
             if (response == null || !"0".equals(String.valueOf(response.get("code")))) {
                 log.warn("[OKX REST] 历史K线响应异常: {}", response);

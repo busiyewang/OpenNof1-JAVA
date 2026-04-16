@@ -8,6 +8,8 @@ import com.crypto.trader.backtest.model.Trade;
 import com.crypto.trader.model.Kline;
 import com.crypto.trader.model.Signal;
 import com.crypto.trader.repository.KlineRepository;
+import com.crypto.trader.service.risk.RiskConfig;
+import com.crypto.trader.service.risk.RiskManager;
 import com.crypto.trader.service.strategy.TradingStrategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -84,11 +86,12 @@ public class BacktestService {
         for (TradingStrategy strategy : strategies) {
             log.info("[回测] 执行策略: {}", strategy.getName());
 
-            BacktestEngine engine = new BacktestEngine(strategy, request);
+            RiskManager rm = buildRiskManager(request);
+            BacktestEngine engine = new BacktestEngine(strategy, request, rm);
             List<Trade> trades = engine.run(klines);
 
             BacktestReport report = MetricsCalculator.calculate(
-                    strategy.getName(), request, trades, engine.getFinalCapital(), klines.size());
+                    strategy.getName(), request, trades, engine.getFinalCapital(), klines.size(), rm);
             reports.add(report);
 
             log.info("[回测] {} 完成: 交易{}次, 胜率{}%, 总收益{}%, 最大回撤{}%",
@@ -165,11 +168,24 @@ public class BacktestService {
             }
         };
 
-        BacktestEngine engine = new BacktestEngine(voteStrategy, request);
+        RiskManager rm = buildRiskManager(request);
+        BacktestEngine engine = new BacktestEngine(voteStrategy, request, rm);
         List<Trade> trades = engine.run(klines);
 
         return MetricsCalculator.calculate(
-                voteStrategy.getName(), request, trades, engine.getFinalCapital(), klines.size());
+                voteStrategy.getName(), request, trades, engine.getFinalCapital(), klines.size(), rm);
+    }
+
+    private RiskManager buildRiskManager(BacktestRequest request) {
+        if (!request.isRiskManagementEnabled()) {
+            return new RiskManager(RiskConfig.disabled(), request.getInitialCapital());
+        }
+        RiskConfig config = RiskConfig.builder()
+                .maxDrawdownPercent(request.getMaxDrawdownPercent())
+                .dailyLossLimitPercent(request.getDailyLossLimitPercent())
+                .consecutiveLossPauseThreshold(request.getConsecutiveLossPauseThreshold())
+                .build();
+        return new RiskManager(config, request.getInitialCapital());
     }
 
     private List<TradingStrategy> filterStrategies(List<String> names) {

@@ -3,8 +3,8 @@ package com.crypto.trader.backtest.engine;
 import com.crypto.trader.backtest.model.BacktestReport;
 import com.crypto.trader.backtest.model.BacktestRequest;
 import com.crypto.trader.backtest.model.Trade;
+import com.crypto.trader.service.risk.RiskManager;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,12 +19,23 @@ public class MetricsCalculator {
     public static BacktestReport calculate(String strategyName, BacktestRequest request,
                                             List<Trade> trades, double finalCapital,
                                             int totalBars) {
+        return calculate(strategyName, request, trades, finalCapital, totalBars, null);
+    }
+
+    /**
+     * 从交易记录列表计算完整的回测报告（含风控统计）。
+     */
+    public static BacktestReport calculate(String strategyName, BacktestRequest request,
+                                            List<Trade> trades, double finalCapital,
+                                            int totalBars, RiskManager riskManager) {
         double initialCapital = request.getInitialCapital();
         double totalReturn = (finalCapital - initialCapital) / initialCapital * 100;
 
         int winTrades = 0, lossTrades = 0;
         double totalWinPnl = 0, totalLossPnl = 0;
         int totalHoldBars = 0;
+        double totalSlippageCost = 0;
+        double totalPositionSize = 0;
 
         for (Trade t : trades) {
             if (t.getPnl() > 0) {
@@ -35,6 +46,8 @@ public class MetricsCalculator {
                 totalLossPnl += Math.abs(t.getPnl());
             }
             totalHoldBars += t.getHoldBars();
+            totalSlippageCost += t.getSlippageCost();
+            totalPositionSize += t.getPositionSizeUsed();
         }
 
         double winRate = trades.isEmpty() ? 0 : (double) winTrades / trades.size() * 100;
@@ -42,6 +55,7 @@ public class MetricsCalculator {
         double avgLoss = lossTrades > 0 ? totalLossPnl / lossTrades : 1;
         double profitLossRatio = avgLoss > 0 ? avgWin / avgLoss : avgWin;
         double avgHoldBars = trades.isEmpty() ? 0 : (double) totalHoldBars / trades.size();
+        double avgPositionSizePercent = trades.isEmpty() ? 0 : totalPositionSize / trades.size();
 
         // 最大回撤
         double maxDrawdown = calculateMaxDrawdown(trades, initialCapital);
@@ -60,6 +74,14 @@ public class MetricsCalculator {
             if (days > 0) {
                 annualized = totalReturn * 365 / days;
             }
+        }
+
+        // 风控统计
+        int circuitBreakerTriggers = 0;
+        int dailyLimitTriggers = 0;
+        if (riskManager != null) {
+            circuitBreakerTriggers = riskManager.getDrawdownTriggerCount();
+            dailyLimitTriggers = riskManager.getDailyLimitTriggerCount();
         }
 
         return BacktestReport.builder()
@@ -82,6 +104,10 @@ public class MetricsCalculator {
                 .maxDrawdownPercent(Math.round(maxDrawdown * 100.0) / 100.0)
                 .sharpeRatio(Math.round(sharpeRatio * 100.0) / 100.0)
                 .maxConsecutiveLosses(maxConsecutiveLosses)
+                .totalSlippageCost(Math.round(totalSlippageCost * 100.0) / 100.0)
+                .avgPositionSizePercent(Math.round(avgPositionSizePercent * 1000.0) / 1000.0)
+                .circuitBreakerTriggers(circuitBreakerTriggers)
+                .dailyLimitTriggers(dailyLimitTriggers)
                 .trades(trades)
                 .build();
     }

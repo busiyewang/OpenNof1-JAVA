@@ -59,6 +59,9 @@ public class MlModelService {
     @Value("${crypto.ml.train-months:6}")
     private int trainMonths;
 
+    @Value("${crypto.ml.label-look-ahead:5}")
+    private int labelLookAhead;
+
     private static final List<String> ONCHAIN_METRICS = List.of(
             "whale_transfer_volume", "nupl", "sopr",
             "exchange_net_flow", "exchange_inflow", "exchange_outflow"
@@ -99,7 +102,6 @@ public class MlModelService {
         // 2. 滑动窗口生成样本（多时间框架 + 链上数据时间对齐）
         List<double[]> featureList = new ArrayList<>();
         List<Integer> labelList = new ArrayList<>();
-        int labelLookAhead = 5;
         int windowSize = FeatureEngineerService.MIN_KLINES;
 
         Map<String, BigDecimal> onChainMap = new HashMap<>();
