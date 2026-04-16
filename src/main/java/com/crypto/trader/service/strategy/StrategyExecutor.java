@@ -6,6 +6,8 @@ import com.crypto.trader.model.Signal;
 import com.crypto.trader.repository.KlineRepository;
 import com.crypto.trader.repository.OnChainMetricRepository;
 import com.crypto.trader.repository.SignalRepository;
+import com.crypto.trader.service.indicator.Ta4jIndicatorService;
+import com.crypto.trader.service.indicator.Ta4jIndicatorService.IndicatorSnapshot;
 import com.crypto.trader.service.notifier.Notifier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +45,8 @@ public class StrategyExecutor {
 
     private final SignalRepository signalRepository;
 
+    private final Ta4jIndicatorService ta4jService;
+
     /** BUY/SELL 得分差距低于此比例视为矛盾 → HOLD */
     private static final double CONFLICT_THRESHOLD = 0.2;
 
@@ -76,22 +80,50 @@ public class StrategyExecutor {
 
         if (allSignals.isEmpty()) return;
 
-        // 加权投票
+        // 检测市场状态，动态调整策略权重
+        IndicatorSnapshot snap = ta4jService.calculateAll(klines);
+        MarketRegimeDetector.Regime regime = MarketRegimeDetector.detect(snap);
+        log.info("[策略执行] {} 市场状态: {} (ADX={}, BBW={}, ATR%={})",
+                symbol, regime,
+                snap != null ? String.format("%.1f", snap.adx14) : "N/A",
+                snap != null ? String.format("%.4f", snap.bbWidth) : "N/A",
+                snap != null ? String.format("%.2f", snap.atrPercent) : "N/A");
+
+        // 加权投票（市场状态感知）
         double buyScore = 0, sellScore = 0;
         int buyCount = 0, sellCount = 0, holdCount = 0;
 
         for (Signal s : allSignals) {
+            double regimeWeight = MarketRegimeDetector.getWeight(regime, s.getStrategyName());
+            double adjustedConfidence = s.getConfidence() * regimeWeight;
+
             switch (s.getAction()) {
-                case BUY -> { buyScore += s.getConfidence(); buyCount++; }
-                case SELL -> { sellScore += s.getConfidence(); sellCount++; }
+                case BUY -> {
+                    buyScore += adjustedConfidence;
+                    buyCount++;
+                    log.debug("[策略执行] {} {} BUY 原始={} 状态权重={} 调整后={}",
+                            symbol, s.getStrategyName(),
+                            String.format("%.2f", s.getConfidence()),
+                            String.format("%.1f", regimeWeight),
+                            String.format("%.2f", adjustedConfidence));
+                }
+                case SELL -> {
+                    sellScore += adjustedConfidence;
+                    sellCount++;
+                    log.debug("[策略执行] {} {} SELL 原始={} 状态权重={} 调整后={}",
+                            symbol, s.getStrategyName(),
+                            String.format("%.2f", s.getConfidence()),
+                            String.format("%.1f", regimeWeight),
+                            String.format("%.2f", adjustedConfidence));
+                }
                 case HOLD -> holdCount++;
             }
         }
 
         double totalDirectional = buyScore + sellScore;
 
-        log.info("[策略执行] {} 投票: BUY={} (权重={}) | SELL={} (权重={}) | HOLD={}",
-                symbol, buyCount, String.format("%.2f", buyScore),
+        log.info("[策略执行] {} 投票({}): BUY={} (权重={}) | SELL={} (权重={}) | HOLD={}",
+                symbol, regime, buyCount, String.format("%.2f", buyScore),
                 sellCount, String.format("%.2f", sellScore), holdCount);
 
         // 全是HOLD或者没有方向性信号
@@ -115,17 +147,18 @@ public class StrategyExecutor {
         double winnerScore = Math.max(buyScore, sellScore);
         double finalConfidence = totalDirectional > 0 ? winnerScore / totalDirectional : 0;
 
-        // 找最高置信度的同方向信号作为代表（取其价格和reason）
+        // 找最高置信度（调整后）的同方向信号作为代表（取其价格和reason）
         Signal representative = allSignals.stream()
                 .filter(s -> s.getAction() == finalAction)
-                .max(Comparator.comparingDouble(Signal::getConfidence))
+                .max(Comparator.comparingDouble(s ->
+                        s.getConfidence() * MarketRegimeDetector.getWeight(regime, s.getStrategyName())))
                 .orElse(null);
 
         if (representative == null) return;
 
         // 构建最终信号
-        String voteDetail = String.format("加权投票: BUY=%.2f(%d票) SELL=%.2f(%d票) HOLD=%d | 优势度=%.0f%%",
-                buyScore, buyCount, sellScore, sellCount, holdCount, dominance * 100);
+        String voteDetail = String.format("加权投票(%s): BUY=%.2f(%d票) SELL=%.2f(%d票) HOLD=%d | 优势度=%.0f%%",
+                regime, buyScore, buyCount, sellScore, sellCount, holdCount, dominance * 100);
 
         Signal finalSignal = Signal.builder()
                 .symbol(symbol)

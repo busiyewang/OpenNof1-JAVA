@@ -46,9 +46,20 @@ public class MacdStrategy implements TradingStrategy {
         boolean goldenCross = snap.macd > snap.macdSignal && snap.macdHistogram > 0;
         boolean deathCross = snap.macd < snap.macdSignal && snap.macdHistogram < 0;
 
+        // MACD 零轴上方金叉 / 零轴下方死叉 — 更强的信号
+        boolean aboveZero = snap.macd > 0;
+        boolean belowZero = snap.macd < 0;
+
         // ADX < 20: 横盘市场，趋势策略不适用
         if (snap.adx14 > 0 && snap.adx14 < 20) {
             log.info("[MACD] {} ADX={} < 20，横盘市场，趋势策略不适用 → HOLD", symbol, fmt(snap.adx14));
+            return holdSignal(symbol);
+        }
+
+        // Histogram 相对强度: |hist| / close — 过滤微弱信号
+        double histStrength = snap.close > 0 ? Math.abs(snap.macdHistogram) / snap.close * 10000 : 0;
+        if ((goldenCross || deathCross) && histStrength < 0.5) {
+            log.info("[MACD] {} 信号过弱 (Hist强度={} < 0.5) → HOLD", symbol, fmt(histStrength));
             return holdSignal(symbol);
         }
 
@@ -56,9 +67,17 @@ public class MacdStrategy implements TradingStrategy {
 
         if (goldenCross) {
             double confidence = calcBuyConfidence(snap);
-            String reason = buildReason("金叉", snap);
-            log.info("[MACD] {} 金叉 → BUY (置信度={}, RSI={}, ADX={})",
-                    symbol, fmt(confidence), fmt(snap.rsi14), fmt(snap.adx14));
+            // 零轴上方金叉（回调确认后再次上攻）更可靠
+            if (aboveZero) {
+                confidence += 0.08;
+                log.info("[MACD] {} 零轴上方金叉(强势) → BUY (置信度={}, RSI={}, ADX={})",
+                        symbol, fmt(confidence), fmt(snap.rsi14), fmt(snap.adx14));
+            } else {
+                log.info("[MACD] {} 金叉 → BUY (置信度={}, RSI={}, ADX={})",
+                        symbol, fmt(confidence), fmt(snap.rsi14), fmt(snap.adx14));
+            }
+            confidence = Math.min(0.95, confidence);
+            String reason = buildReason(aboveZero ? "零轴上方金叉" : "金叉", snap);
             return Signal.builder()
                     .symbol(symbol).timestamp(Instant.now())
                     .action(Signal.Action.BUY).price(price)
@@ -68,9 +87,17 @@ public class MacdStrategy implements TradingStrategy {
 
         if (deathCross) {
             double confidence = calcSellConfidence(snap);
-            String reason = buildReason("死叉", snap);
-            log.info("[MACD] {} 死叉 → SELL (置信度={}, RSI={}, ADX={})",
-                    symbol, fmt(confidence), fmt(snap.rsi14), fmt(snap.adx14));
+            // 零轴下方死叉（反弹失败后继续下跌）更可靠
+            if (belowZero) {
+                confidence += 0.08;
+                log.info("[MACD] {} 零轴下方死叉(弱势) → SELL (置信度={}, RSI={}, ADX={})",
+                        symbol, fmt(confidence), fmt(snap.rsi14), fmt(snap.adx14));
+            } else {
+                log.info("[MACD] {} 死叉 → SELL (置信度={}, RSI={}, ADX={})",
+                        symbol, fmt(confidence), fmt(snap.rsi14), fmt(snap.adx14));
+            }
+            confidence = Math.min(0.95, confidence);
+            String reason = buildReason(belowZero ? "零轴下方死叉" : "死叉", snap);
             return Signal.builder()
                     .symbol(symbol).timestamp(Instant.now())
                     .action(Signal.Action.SELL).price(price)

@@ -53,8 +53,18 @@ public class BollingerStrategy implements TradingStrategy {
         boolean aboveUpper = snap.close > snap.bbUpper;
         boolean belowLower = snap.close < snap.bbLower;
 
+        // 强趋势过滤: ADX≥30 时不做逆势均值回归
+        // 上涨强趋势中做空 = 逆势找死, 下跌强趋势中做多 = 接飞刀
+        boolean strongTrend = snap.adx14 >= 30;
+        boolean upTrend = snap.ema12 > snap.ema26 && snap.sma5 > snap.sma20;
+        boolean downTrend = snap.ema12 < snap.ema26 && snap.sma5 < snap.sma20;
+
         if (aboveUpper) {
-            // 超买检测: BB上轨突破 + RSI/Stochastic/CCI 确认
+            if (strongTrend && upTrend) {
+                log.info("[Bollinger] {} 突破上轨但处于强上升趋势(ADX={}), 不逆势做空 → HOLD",
+                        symbol, fmt(snap.adx14));
+                return holdSignal(symbol);
+            }
             double confidence = calcSellConfidence(snap);
             String reason = buildReason("超买", snap);
             log.info("[Bollinger] {} 突破上轨(超买) → SELL (置信度={})", symbol, fmt4(confidence));
@@ -66,7 +76,11 @@ public class BollingerStrategy implements TradingStrategy {
         }
 
         if (belowLower) {
-            // 超卖检测
+            if (strongTrend && downTrend) {
+                log.info("[Bollinger] {} 跌破下轨但处于强下降趋势(ADX={}), 不逆势做多 → HOLD",
+                        symbol, fmt(snap.adx14));
+                return holdSignal(symbol);
+            }
             double confidence = calcBuyConfidence(snap);
             String reason = buildReason("超卖", snap);
             log.info("[Bollinger] {} 跌破下轨(超卖) → BUY (置信度={})", symbol, fmt4(confidence));
